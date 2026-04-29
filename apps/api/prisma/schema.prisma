@@ -1,0 +1,170 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Role {
+  PATIENT
+  WORKER
+  ADMIN
+}
+
+enum Locale {
+  EN
+  FI
+}
+
+enum AppointmentStatus {
+  CONFIRMED
+  CANCELED
+  COMPLETED
+  NO_SHOW
+}
+
+model User {
+  id              String          @id @default(cuid())
+  email           String          @unique
+  passwordHash    String
+  role            Role            @default(PATIENT)
+  preferredLocale Locale          @default(EN)
+  name            String
+  phone           String?
+  active          Boolean         @default(true)
+  patientProfile  PatientProfile?
+  workerProfile   WorkerProfile?
+  sessions        Session[]
+  appointments    Appointment[]   @relation("PatientAppointments")
+  createdRecords  Appointment[]   @relation("CreatedAppointments")
+  updatedRecords  Appointment[]   @relation("UpdatedAppointments")
+  auditLogs       AuditLog[]      @relation("ActorAuditLogs")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model PatientProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WorkerProfile {
+  id                         String               @id @default(cuid())
+  userId                     String               @unique
+  user                       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                      String
+  bio                        String?
+  timezone                   String               @default("Europe/Helsinki")
+  appointmentDurationMinutes Int                  @default(30)
+  active                     Boolean              @default(true)
+  services                   WorkerService[]
+  availability               AvailabilityWindow[]
+  timeOff                    TimeOff[]
+  appointments               Appointment[]
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+}
+
+model Service {
+  id            String          @id @default(cuid())
+  nameEn        String
+  nameFi        String
+  descriptionEn String?
+  descriptionFi String?
+  active        Boolean         @default(true)
+  workers       WorkerService[]
+  appointments  Appointment[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model WorkerService {
+  workerProfileId String
+  serviceId       String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  service         Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([workerProfileId, serviceId])
+}
+
+model AvailabilityWindow {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  weekday         Int
+  startMinute     Int
+  endMinute       Int
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([workerProfileId, weekday])
+}
+
+model TimeOff {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  startsAt        DateTime
+  endsAt          DateTime
+  reason          String?
+  createdAt       DateTime      @default(now())
+
+  @@index([workerProfileId, startsAt, endsAt])
+}
+
+model Appointment {
+  id                 String            @id @default(cuid())
+  patientId          String
+  patient            User              @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
+  workerProfileId    String
+  workerProfile      WorkerProfile     @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
+  serviceId          String
+  service            Service           @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  startsAt           DateTime
+  endsAt             DateTime
+  status             AppointmentStatus @default(CONFIRMED)
+  cancellationReason String?
+  canceledAt         DateTime?
+  createdById        String
+  createdBy          User              @relation("CreatedAppointments", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById        String?
+  updatedBy          User?             @relation("UpdatedAppointments", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([patientId, startsAt])
+  @@index([workerProfileId, startsAt, endsAt])
+  @@index([status])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}

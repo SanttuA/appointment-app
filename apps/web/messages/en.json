@@ -1,0 +1,88 @@
+{
+  "admin": {
+    "createService": "Create service",
+    "createUser": "Create user",
+    "saveService": "Save service",
+    "saveUser": "Save user",
+    "serviceNameEn": "Service name in English",
+    "serviceNameFi": "Service name in Finnish",
+    "title": "Admin controls"
+  },
+  "app": {
+    "subtitle": "Book appointments, manage availability, and keep operations accessible.",
+    "title": "Healthcare appointments"
+  },
+  "appointments": {
+    "cancel": "Cancel",
+    "empty": "No appointments yet.",
+    "title": "Appointments"
+  },
+  "auth": {
+    "createAccount": "Create account",
+    "login": "Log in",
+    "logout": "Log out",
+    "mode": "Authentication mode",
+    "register": "Register",
+    "signIn": "Sign in"
+  },
+  "booking": {
+    "book": "Book",
+    "noSlots": "No slots loaded. Choose filters and refresh slots.",
+    "refreshSlots": "Refresh slots",
+    "subtitle": "Patients can book available times from healthcare worker schedules.",
+    "title": "Book an appointment"
+  },
+  "errors": {
+    "AUTH_REQUIRED": "Please sign in first.",
+    "BOOKING_WINDOW_INVALID": "The selected time is outside the booking window.",
+    "CANCELLATION_WINDOW_CLOSED": "This appointment can no longer be canceled.",
+    "EMAIL_ALREADY_REGISTERED": "That email is already registered.",
+    "FORBIDDEN": "You do not have permission for that action.",
+    "INVALID_CREDENTIALS": "Invalid email or password.",
+    "INTERNAL_ERROR": "Something went wrong. Try again shortly.",
+    "REQUEST_FAILED": "The request failed.",
+    "SERVICE_NOT_AVAILABLE": "The selected service is not available for this worker.",
+    "SLOT_UNAVAILABLE": "That slot is no longer available.",
+    "VALIDATION_FAILED": "Check the form fields and try again."
+  },
+  "fields": {
+    "email": "Email",
+    "name": "Name",
+    "password": "Password",
+    "role": "Role",
+    "service": "Service",
+    "startDate": "Start date",
+    "worker": "Healthcare worker"
+  },
+  "language": {
+    "label": "Language"
+  },
+  "notices": {
+    "appointmentBooked": "Appointment booked.",
+    "appointmentCanceled": "Appointment canceled.",
+    "availabilitySaved": "Availability saved.",
+    "serviceCreated": "Service created.",
+    "signedIn": "Signed in.",
+    "signedOut": "Signed out.",
+    "userCreated": "User created."
+  },
+  "roles": {
+    "admin": "Admin",
+    "patient": "Patient",
+    "worker": "Healthcare worker"
+  },
+  "weekdays": {
+    "1": "Mon",
+    "2": "Tue",
+    "3": "Wed",
+    "4": "Thu",
+    "5": "Fri"
+  },
+  "worker": {
+    "end": "End time",
+    "saveAvailability": "Save availability",
+    "start": "Start time",
+    "title": "Worker schedule",
+    "weekdays": "Weekdays"
+  }
+}

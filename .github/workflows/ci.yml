@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @appointment/api db:generate
+        env:
+          DATABASE_URL: file:./prisma/test/ci.db
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Prepare database
+        run: pnpm --filter @appointment/api db:push
+        env:
+          DATABASE_URL: file:./prisma/test/ci.db
+          SESSION_SECRET: ci-session-secret-ci-session-secret
+
+      - name: Unit and integration tests
+        run: pnpm test
+        env:
+          DATABASE_URL: file:./prisma/test/ci.db
+          SESSION_SECRET: ci-session-secret-ci-session-secret
+          CORS_ORIGIN: http://localhost:3000
+
+      - name: Install Playwright browser
+        run: pnpm --filter @appointment/web exec playwright install --with-deps chromium
+
+      - name: Seed E2E database
+        run: pnpm db:seed
+        env:
+          DATABASE_URL: file:./prisma/test/ci.db
+          SESSION_SECRET: ci-session-secret-ci-session-secret
+
+      - name: E2E tests
+        run: pnpm e2e
+        env:
+          DATABASE_URL: file:./prisma/test/ci.db
+          SESSION_SECRET: ci-session-secret-ci-session-secret
+          CORS_ORIGIN: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+
+      - name: Build Docker images
+        run: pnpm docker:prod:build

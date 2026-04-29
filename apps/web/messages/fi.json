@@ -1,0 +1,88 @@
+{
+  "admin": {
+    "createService": "Luo palvelu",
+    "createUser": "Luo käyttäjä",
+    "saveService": "Tallenna palvelu",
+    "saveUser": "Tallenna käyttäjä",
+    "serviceNameEn": "Palvelun nimi englanniksi",
+    "serviceNameFi": "Palvelun nimi suomeksi",
+    "title": "Ylläpidon hallinta"
+  },
+  "app": {
+    "subtitle": "Varaa aikoja, hallitse saatavuutta ja pidä käyttö saavutettavana.",
+    "title": "Terveydenhuollon ajanvaraus"
+  },
+  "appointments": {
+    "cancel": "Peru",
+    "empty": "Ei ajanvarauksia.",
+    "title": "Ajanvaraukset"
+  },
+  "auth": {
+    "createAccount": "Luo tili",
+    "login": "Kirjaudu",
+    "logout": "Kirjaudu ulos",
+    "mode": "Kirjautumistapa",
+    "register": "Rekisteröidy",
+    "signIn": "Kirjaudu sisään"
+  },
+  "booking": {
+    "book": "Varaa",
+    "noSlots": "Aikoja ei ole ladattu. Valitse tiedot ja päivitä ajat.",
+    "refreshSlots": "Päivitä ajat",
+    "subtitle": "Potilaat voivat varata vapaita aikoja työntekijöiden kalentereista.",
+    "title": "Varaa aika"
+  },
+  "errors": {
+    "AUTH_REQUIRED": "Kirjaudu ensin sisään.",
+    "BOOKING_WINDOW_INVALID": "Valittu aika on varausikkunan ulkopuolella.",
+    "CANCELLATION_WINDOW_CLOSED": "Tätä aikaa ei voi enää perua.",
+    "EMAIL_ALREADY_REGISTERED": "Sähköposti on jo rekisteröity.",
+    "FORBIDDEN": "Sinulla ei ole oikeutta tähän toimintoon.",
+    "INVALID_CREDENTIALS": "Sähköposti tai salasana on virheellinen.",
+    "INTERNAL_ERROR": "Jokin meni pieleen. Yritä hetken kuluttua uudelleen.",
+    "REQUEST_FAILED": "Pyyntö epäonnistui.",
+    "SERVICE_NOT_AVAILABLE": "Valittu palvelu ei ole saatavilla tältä työntekijältä.",
+    "SLOT_UNAVAILABLE": "Valittu aika ei ole enää saatavilla.",
+    "VALIDATION_FAILED": "Tarkista lomakkeen kentät ja yritä uudelleen."
+  },
+  "fields": {
+    "email": "Sähköposti",
+    "name": "Nimi",
+    "password": "Salasana",
+    "role": "Rooli",
+    "service": "Palvelu",
+    "startDate": "Aloituspäivä",
+    "worker": "Terveydenhuollon työntekijä"
+  },
+  "language": {
+    "label": "Kieli"
+  },
+  "notices": {
+    "appointmentBooked": "Aika varattu.",
+    "appointmentCanceled": "Aika peruttu.",
+    "availabilitySaved": "Saatavuus tallennettu.",
+    "serviceCreated": "Palvelu luotu.",
+    "signedIn": "Kirjauduttu sisään.",
+    "signedOut": "Kirjauduttu ulos.",
+    "userCreated": "Käyttäjä luotu."
+  },
+  "roles": {
+    "admin": "Ylläpitäjä",
+    "patient": "Potilas",
+    "worker": "Terveydenhuollon työntekijä"
+  },
+  "weekdays": {
+    "1": "Ma",
+    "2": "Ti",
+    "3": "Ke",
+    "4": "To",
+    "5": "Pe"
+  },
+  "worker": {
+    "end": "Päättymisaika",
+    "saveAvailability": "Tallenna saatavuus",
+    "start": "Alkamisaika",
+    "title": "Työntekijän aikataulu",
+    "weekdays": "Viikonpäivät"
+  }
+}

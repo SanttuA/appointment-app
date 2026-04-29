@@ -1,0 +1,46 @@
+{
+  "name": "appointment-app",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": "24.15.0",
+    "pnpm": "10.33.0"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "lint": "oxlint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:migrate": "pnpm --filter @appointment/api db:migrate",
+    "db:deploy": "pnpm --filter @appointment/api db:deploy",
+    "db:seed": "pnpm --filter @appointment/api db:seed",
+    "docker:prod:build": "SESSION_SECRET=build-time-placeholder-session-secret docker compose -f docker-compose.prod.yml build",
+    "docker:prod:up": "docker compose -f docker-compose.prod.yml up -d",
+    "e2e": "pnpm --filter @appointment/web e2e"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "oxlint": "1.62.0",
+    "prettier": "3.8.3",
+    "turbo": "2.9.6",
+    "typescript": "6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "@prisma/engines",
+      "@swc/core",
+      "argon2",
+      "better-sqlite3",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  }
+}

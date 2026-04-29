@@ -1,0 +1,13 @@
+.git
+node_modules
+.next
+dist
+coverage
+playwright-report
+test-results
+.turbo
+apps/api/prisma/local
+data
+.env
+.env.*
+!.env.example

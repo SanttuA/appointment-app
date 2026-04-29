@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "browser": true,
+    "node": true
+  },
+  "plugins": ["typescript", "react", "nextjs", "vitest"],
+  "ignorePatterns": [
+    "node_modules/**",
+    ".next/**",
+    "dist/**",
+    "coverage/**",
+    "playwright-report/**",
+    "test-results/**",
+    "apps/api/src/generated/**"
+  ],
+  "rules": {
+    "no-console": "off",
+    "typescript/no-explicit-any": "warn"
+  }
+}
