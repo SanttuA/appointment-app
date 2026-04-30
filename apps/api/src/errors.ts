@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
+const passwordStrengthMinimum = 10;
 const passwordValidationFields = new Set<PropertyKey>(["password", "newPassword"]);
 
 export class ApiError extends Error {
@@ -22,7 +23,8 @@ function weakPasswordMinimum(error: ZodError) {
       field !== undefined &&
       passwordValidationFields.has(field) &&
       "minimum" in issue &&
-      typeof issue.minimum === "number"
+      typeof issue.minimum === "number" &&
+      issue.minimum >= passwordStrengthMinimum
     ) {
       return issue.minimum;
     }

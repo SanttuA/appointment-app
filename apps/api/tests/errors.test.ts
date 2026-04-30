@@ -41,4 +41,14 @@ describe("error mapping", () => {
       }
     },
   );
+
+  it("keeps login password presence checks as generic validation errors", () => {
+    const result = z.object({ password: z.string().min(1) }).safeParse({ password: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const mapped = mapError(result.error);
+      expect(mapped.statusCode).toBe(400);
+      expect(mapped.body.error.code).toBe("VALIDATION_FAILED");
+    }
+  });
 });
