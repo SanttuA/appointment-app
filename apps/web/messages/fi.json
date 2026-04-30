@@ -40,6 +40,7 @@
     "FORBIDDEN": "Sinulla ei ole oikeutta tähän toimintoon.",
     "INVALID_CREDENTIALS": "Sähköposti tai salasana on virheellinen.",
     "INTERNAL_ERROR": "Jokin meni pieleen. Yritä hetken kuluttua uudelleen.",
+    "PASSWORD_TOO_WEAK": "Salasanan on oltava vähintään 10 merkkiä.",
     "REQUEST_FAILED": "Pyyntö epäonnistui.",
     "SERVICE_NOT_AVAILABLE": "Valittu palvelu ei ole saatavilla tältä työntekijältä.",
     "SLOT_UNAVAILABLE": "Valittu aika ei ole enää saatavilla.",

@@ -1,6 +1,9 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
+const passwordStrengthMinimum = 10;
+const passwordValidationFields = new Set<PropertyKey>(["password", "newPassword"]);
+
 export class ApiError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -10,6 +13,24 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+function weakPasswordMinimum(error: ZodError) {
+  for (const issue of error.issues) {
+    const field = issue.path[issue.path.length - 1];
+    if (
+      issue.code === "too_small" &&
+      field !== undefined &&
+      passwordValidationFields.has(field) &&
+      "minimum" in issue &&
+      typeof issue.minimum === "number" &&
+      issue.minimum >= passwordStrengthMinimum
+    ) {
+      return issue.minimum;
+    }
+  }
+
+  return null;
 }
 
 export function mapError(error: FastifyError | Error) {
@@ -27,6 +48,20 @@ export function mapError(error: FastifyError | Error) {
   }
 
   if (error instanceof ZodError) {
+    const minimum = weakPasswordMinimum(error);
+    if (minimum !== null) {
+      return {
+        statusCode: 400,
+        body: {
+          error: {
+            code: "PASSWORD_TOO_WEAK",
+            message: `Password must be at least ${minimum} characters`,
+            params: { minimum },
+          },
+        },
+      };
+    }
+
     return {
       statusCode: 400,
       body: {

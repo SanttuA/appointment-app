@@ -83,13 +83,15 @@ function tomorrowInputDate() {
 }
 
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (init.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
+    headers,
   });
   const data = (await response.json().catch(() => ({}))) as ApiErrorBody;
   if (!response.ok) {

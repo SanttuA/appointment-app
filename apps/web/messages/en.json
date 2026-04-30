@@ -40,6 +40,7 @@
     "FORBIDDEN": "You do not have permission for that action.",
     "INVALID_CREDENTIALS": "Invalid email or password.",
     "INTERNAL_ERROR": "Something went wrong. Try again shortly.",
+    "PASSWORD_TOO_WEAK": "Password must be at least 10 characters.",
     "REQUEST_FAILED": "The request failed.",
     "SERVICE_NOT_AVAILABLE": "The selected service is not available for this worker.",
     "SLOT_UNAVAILABLE": "That slot is no longer available.",
