@@ -24,4 +24,21 @@ describe("error mapping", () => {
       expect(mapped.body.error.code).toBe("VALIDATION_FAILED");
     }
   });
+
+  it.each(["password", "newPassword"])(
+    "returns a stable weak-password code for short %s values",
+    (field) => {
+      const result = z.object({ [field]: z.string().min(10) }).safeParse({ [field]: "short" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const mapped = mapError(result.error);
+        expect(mapped.statusCode).toBe(400);
+        expect(mapped.body.error).toMatchObject({
+          code: "PASSWORD_TOO_WEAK",
+          message: "Password must be at least 10 characters",
+          params: { minimum: 10 },
+        });
+      }
+    },
+  );
 });
