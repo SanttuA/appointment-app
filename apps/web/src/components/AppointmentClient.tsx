@@ -1,8 +1,18 @@
 "use client";
 
-import { CalendarClock, Languages, LogOut, Shield, Stethoscope, UserPlus } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronDown,
+  Languages,
+  LogOut,
+  Shield,
+  Stethoscope,
+  UserCircle,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Locale } from "@/i18n/routing";
 
 type Role = "PATIENT" | "WORKER" | "ADMIN";
@@ -140,6 +150,10 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [selectedWorkerId, setSelectedWorkerId] = useState("");
   const [selectedDate, setSelectedDate] = useState(tomorrowInputDate);
   const [saving, setSaving] = useState(false);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [pendingSlot, setPendingSlot] = useState<Slot | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [availabilityStart, setAvailabilityStart] = useState("09:00");
   const [availabilityEnd, setAvailabilityEnd] = useState("16:00");
   const [weekdays, setWeekdays] = useState([1, 2, 3, 4, 5]);
@@ -148,11 +162,14 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [adminUserName, setAdminUserName] = useState("");
   const [serviceNameEn, setServiceNameEn] = useState("");
   const [serviceNameFi, setServiceNameFi] = useState("");
+  const authFirstFieldRef = useRef<HTMLInputElement>(null);
 
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
   const selectableServices = selectedWorker?.services.length ? selectedWorker.services : services;
 
   const userCanBook = user?.role === "PATIENT" || user?.role === "ADMIN";
+  const profileInitial =
+    user?.name.trim().charAt(0).toUpperCase() || user?.email.charAt(0).toUpperCase();
 
   const appointmentFormatter = useMemo(
     () => (appointment: Appointment) =>
@@ -207,9 +224,77 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!authDialogOpen) return;
+    const focusTimer = window.setTimeout(() => authFirstFieldRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [authDialogOpen, authMode]);
+
+  useEffect(() => {
+    if (!authDialogOpen && !profileMenuOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (authDialogOpen) closeAuthDialog();
+      setProfileMenuOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [authDialogOpen, profileMenuOpen, saving]);
+
+  function openAuthDialog(mode: "login" | "register" = "login", slot: Slot | null = null) {
+    setAuthMode(mode);
+    setPendingSlot(slot);
+    setAuthError(null);
+    setError(null);
+    setNotice(null);
+    setAuthDialogOpen(true);
+    setProfileMenuOpen(false);
+  }
+
+  function closeAuthDialog() {
+    if (saving) return;
+    setAuthDialogOpen(false);
+    setPendingSlot(null);
+    setAuthError(null);
+  }
+
+  async function fetchSlots() {
+    if (!selectedWorkerId || !selectedServiceId) return;
+    const from = new Date(`${selectedDate}T00:00:00.000Z`);
+    const to = new Date(from);
+    to.setUTCDate(to.getUTCDate() + 7);
+    const params = new URLSearchParams({
+      serviceId: selectedServiceId,
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    const data = await apiRequest<{ slots: Slot[] }>(
+      `/workers/${selectedWorkerId}/slots?${params.toString()}`,
+    );
+    setSlots(data.slots);
+  }
+
+  async function createAppointment(slot: Slot) {
+    await apiRequest("/appointments", {
+      method: "POST",
+      body: JSON.stringify({
+        workerProfileId: selectedWorkerId,
+        serviceId: selectedServiceId,
+        startsAt: slot.startsAt,
+      }),
+    });
+    await Promise.all([refreshSession(), fetchSlots()]);
+  }
+
   async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await run(async () => {
+    setAuthError(null);
+    setError(null);
+    setNotice(null);
+    setSaving(true);
+    try {
       if (authMode === "register") {
         await apiRequest<{ user: User }>("/auth/register", {
           method: "POST",
@@ -227,7 +312,26 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
         });
       }
       await refreshSession();
-    }, t("notices.signedIn"));
+
+      const slotToBook = pendingSlot;
+      setPendingSlot(null);
+      setAuthDialogOpen(false);
+
+      if (slotToBook) {
+        try {
+          await createAppointment(slotToBook);
+          setNotice(t("notices.appointmentBooked"));
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : "REQUEST_FAILED");
+        }
+      } else {
+        setNotice(t("notices.signedIn"));
+      }
+    } catch (caught) {
+      setAuthError(caught instanceof Error ? caught.message : "REQUEST_FAILED");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function logout() {
@@ -235,39 +339,31 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       await apiRequest("/auth/logout", { method: "POST" });
       setUser(null);
       setAppointments([]);
+      setProfileMenuOpen(false);
     }, t("notices.signedOut"));
   }
 
   async function loadSlots() {
-    await run(async () => {
-      if (!selectedWorkerId || !selectedServiceId) return;
-      const from = new Date(`${selectedDate}T00:00:00.000Z`);
-      const to = new Date(from);
-      to.setUTCDate(to.getUTCDate() + 7);
-      const params = new URLSearchParams({
-        serviceId: selectedServiceId,
-        from: from.toISOString(),
-        to: to.toISOString(),
-      });
-      const data = await apiRequest<{ slots: Slot[] }>(
-        `/workers/${selectedWorkerId}/slots?${params.toString()}`,
-      );
-      setSlots(data.slots);
-    });
+    await run(fetchSlots);
   }
 
   async function bookSlot(slot: Slot) {
     await run(async () => {
-      await apiRequest("/appointments", {
-        method: "POST",
-        body: JSON.stringify({
-          workerProfileId: selectedWorkerId,
-          serviceId: selectedServiceId,
-          startsAt: slot.startsAt,
-        }),
-      });
-      await Promise.all([refreshSession(), loadSlots()]);
+      await createAppointment(slot);
     }, t("notices.appointmentBooked"));
+  }
+
+  function requestBooking(slot: Slot) {
+    if (!user) {
+      openAuthDialog("login", slot);
+      return;
+    }
+    if (!userCanBook) {
+      setError("FORBIDDEN");
+      setNotice(null);
+      return;
+    }
+    void bookSlot(slot);
   }
 
   async function cancelAppointment(id: string) {
@@ -353,106 +449,85 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
               <p className="muted text-sm">{t("app.subtitle")}</p>
             </div>
           </div>
-          <nav aria-label={t("language.label")} className="flex items-center gap-2">
-            <Languages aria-hidden="true" size={20} />
-            <a
-              className="btn-secondary"
-              aria-current={locale === "en" ? "page" : undefined}
-              href="/en"
-            >
-              English
-            </a>
-            <a
-              className="btn-secondary"
-              aria-current={locale === "fi" ? "page" : undefined}
-              href="/fi"
-            >
-              Suomi
-            </a>
-          </nav>
+          <div className="flex flex-wrap items-center gap-3">
+            <nav aria-label={t("language.label")} className="flex items-center gap-2">
+              <Languages aria-hidden="true" size={20} />
+              <a
+                className="btn-secondary"
+                aria-current={locale === "en" ? "page" : undefined}
+                href="/en"
+              >
+                English
+              </a>
+              <a
+                className="btn-secondary"
+                aria-current={locale === "fi" ? "page" : undefined}
+                href="/fi"
+              >
+                Suomi
+              </a>
+            </nav>
+
+            {user ? (
+              <div className="relative">
+                <button
+                  aria-expanded={profileMenuOpen}
+                  aria-haspopup="true"
+                  className="btn-secondary flex items-center gap-2"
+                  onClick={() => setProfileMenuOpen((current) => !current)}
+                  type="button"
+                >
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-teal-700 text-sm font-bold text-white">
+                    {profileInitial}
+                  </span>
+                  <span className="max-w-36 truncate">{user.name}</span>
+                  <ChevronDown aria-hidden="true" size={16} />
+                </button>
+                {profileMenuOpen ? (
+                  <div className="surface absolute right-0 z-20 mt-2 w-72 p-4 shadow-lg">
+                    <p className="text-xs font-bold uppercase text-teal-700">
+                      {roleLabel(user.role, t)}
+                    </p>
+                    <p className="mt-1 font-bold">{user.name}</p>
+                    <p className="muted break-words text-sm">{user.email}</p>
+                    <button
+                      className="btn-secondary mt-4 flex w-full items-center justify-center gap-2"
+                      onClick={logout}
+                      type="button"
+                    >
+                      <LogOut aria-hidden="true" size={18} />
+                      {t("auth.logout")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                className="btn-primary flex items-center gap-2"
+                onClick={() => openAuthDialog("login")}
+                type="button"
+              >
+                <UserCircle aria-hidden="true" size={18} />
+                {t("auth.login")}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[340px_1fr] lg:px-8">
-        <aside className="surface p-5">
-          {user ? (
-            <div className="grid gap-4">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-wide text-teal-700">
-                  {roleLabel(user.role, t)}
-                </p>
-                <h2 className="mt-1 text-xl font-bold">{user.name}</h2>
-                <p className="muted break-words text-sm">{user.email}</p>
-              </div>
-              <button
-                className="btn-secondary flex items-center justify-center gap-2"
-                onClick={logout}
-              >
-                <LogOut aria-hidden="true" size={18} />
-                {t("auth.logout")}
-              </button>
-            </div>
-          ) : (
-            <form className="grid gap-4" onSubmit={submitAuth}>
-              <div className="flex gap-2" aria-label={t("auth.mode")}>
-                <button
-                  className={authMode === "login" ? "btn-primary" : "btn-secondary"}
-                  type="button"
-                  onClick={() => setAuthMode("login")}
-                >
-                  {t("auth.login")}
-                </button>
-                <button
-                  className={authMode === "register" ? "btn-primary" : "btn-secondary"}
-                  type="button"
-                  onClick={() => setAuthMode("register")}
-                >
-                  {t("auth.register")}
-                </button>
-              </div>
-              {authMode === "register" ? (
-                <label className="field">
-                  <span>{t("fields.name")}</span>
-                  <input value={name} onChange={(event) => setName(event.target.value)} required />
-                </label>
-              ) : null}
-              <label className="field">
-                <span>{t("fields.email")}</span>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>{t("fields.password")}</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
-              <button className="btn-primary" type="submit" disabled={saving}>
-                {authMode === "register" ? t("auth.createAccount") : t("auth.signIn")}
-              </button>
-            </form>
-          )}
-
+      <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="grid gap-4" aria-live="polite">
           {error ? (
-            <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+            <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
               {errorMessage(error)}
             </p>
           ) : null}
           {notice ? (
-            <p className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
+            <p className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
               {notice}
             </p>
           ) : null}
-        </aside>
 
-        <div className="grid gap-5">
           <section className="surface p-5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -508,20 +583,20 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
               </label>
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-5 grid gap-3 lg:grid-cols-2">
               {slots.length ? (
                 slots.slice(0, 12).map((slot) => (
                   <div
-                    className="surface flex items-center justify-between gap-3 p-3"
+                    className="surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
                     key={slot.startsAt}
                   >
-                    <span className="text-sm font-semibold">
+                    <span className="font-semibold">
                       {formatDateTime(slot.startsAt, locale, selectedWorker?.timezone)}
                     </span>
                     <button
-                      className="btn-primary"
-                      disabled={!userCanBook || saving}
-                      onClick={() => bookSlot(slot)}
+                      className="btn-primary min-w-28"
+                      disabled={(user !== null && !userCanBook) || saving}
+                      onClick={() => requestBooking(slot)}
                     >
                       {t("booking.book")}
                     </button>
@@ -695,6 +770,105 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           ) : null}
         </div>
       </div>
+
+      {authDialogOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6">
+          <section
+            aria-labelledby="auth-dialog-title"
+            aria-modal="true"
+            className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold" id="auth-dialog-title">
+                  {pendingSlot ? t("booking.signInToBook") : t("auth.account")}
+                </h2>
+                {pendingSlot ? (
+                  <p className="muted mt-1 text-sm">
+                    {formatDateTime(pendingSlot.startsAt, locale, selectedWorker?.timezone)}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                aria-label={t("auth.close")}
+                className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+                disabled={saving}
+                onClick={closeAuthDialog}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            <form className="mt-5 grid gap-4" onSubmit={submitAuth}>
+              <div className="flex gap-2" aria-label={t("auth.mode")}>
+                <button
+                  className={authMode === "login" ? "btn-primary" : "btn-secondary"}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError(null);
+                  }}
+                >
+                  {t("auth.login")}
+                </button>
+                <button
+                  className={authMode === "register" ? "btn-primary" : "btn-secondary"}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthError(null);
+                  }}
+                >
+                  {t("auth.register")}
+                </button>
+              </div>
+              {authMode === "register" ? (
+                <label className="field">
+                  <span>{t("fields.name")}</span>
+                  <input
+                    ref={authFirstFieldRef}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    required
+                  />
+                </label>
+              ) : null}
+              <label className="field">
+                <span>{t("fields.email")}</span>
+                <input
+                  ref={authMode === "login" ? authFirstFieldRef : undefined}
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>{t("fields.password")}</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </label>
+              {authError ? (
+                <p
+                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
+                  role="alert"
+                >
+                  {errorMessage(authError)}
+                </p>
+              ) : null}
+              <button className="btn-primary" type="submit" disabled={saving}>
+                {authMode === "register" ? t("auth.createAccount") : t("auth.signIn")}
+              </button>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -18,6 +18,8 @@
     "title": "Ajanvaraukset"
   },
   "auth": {
+    "account": "Tili",
+    "close": "Sulje",
     "createAccount": "Luo tili",
     "login": "Kirjaudu",
     "logout": "Kirjaudu ulos",
@@ -29,6 +31,7 @@
     "book": "Varaa",
     "noSlots": "Aikoja ei ole ladattu. Valitse tiedot ja päivitä ajat.",
     "refreshSlots": "Päivitä ajat",
+    "signInToBook": "Kirjaudu sisään tai luo tili varataksesi tämän ajan.",
     "subtitle": "Potilaat voivat varata vapaita aikoja työntekijöiden kalentereista.",
     "title": "Varaa aika"
   },

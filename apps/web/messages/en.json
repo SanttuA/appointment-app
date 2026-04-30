@@ -18,6 +18,8 @@
     "title": "Appointments"
   },
   "auth": {
+    "account": "Account",
+    "close": "Close",
     "createAccount": "Create account",
     "login": "Log in",
     "logout": "Log out",
@@ -29,6 +31,7 @@
     "book": "Book",
     "noSlots": "No slots loaded. Choose filters and refresh slots.",
     "refreshSlots": "Refresh slots",
+    "signInToBook": "Sign in or create an account to book this time.",
     "subtitle": "Patients can book available times from healthcare worker schedules.",
     "title": "Book an appointment"
   },
