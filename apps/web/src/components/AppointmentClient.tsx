@@ -948,15 +948,10 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   async function saveAvailability(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run(async () => {
-      await apiRequest("/worker/profile", {
-        method: "PATCH",
-        body: JSON.stringify({
-          location: workerLocation,
-        }),
-      });
-      await apiRequest("/worker/availability", {
+      await apiRequest("/worker/settings", {
         method: "PUT",
         body: JSON.stringify({
+          location: workerLocation,
           windows: weekdays.map((weekday) => ({
             weekday,
             startMinute: timeToMinute(availabilityStart),

@@ -172,6 +172,87 @@ test("stale slot responses do not overwrite newer filter results", async ({ page
   await expect(page.getByRole("button", { name: "Book" })).toHaveCount(0);
 });
 
+test("worker settings save uses a single atomic request", async ({ page }) => {
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-worker-settings",
+    name: { en: "Settings service", fi: "Asetuspalvelu" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Original clinic",
+    name: "Dr. Atomic Settings",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const settingsRequests: unknown[] = [];
+  let splitProfileRequest = false;
+  let splitAvailabilityRequest = false;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({
+      json: {
+        user: {
+          email: "worker@example.com",
+          id: "worker-user",
+          name: "Dr. Atomic Settings",
+          phone: null,
+          preferredLocale: "en",
+          role: "WORKER",
+          workerProfile: worker,
+        },
+      },
+    });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: [] } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route("http://localhost:4000/worker/profile", async (route) => {
+    splitProfileRequest = true;
+    await route.fulfill({ json: { worker } });
+  });
+  await page.route("http://localhost:4000/worker/availability", async (route) => {
+    splitAvailabilityRequest = true;
+    await route.fulfill({ json: { windows: [] } });
+  });
+  await page.route("http://localhost:4000/worker/settings", async (route) => {
+    settingsRequests.push(route.request().postDataJSON());
+    await route.fulfill({ json: { windows: [], worker } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+  await page.getByLabel("Location").fill("Atomic clinic");
+  await page.getByRole("button", { name: "Save availability" }).click();
+
+  await expect.poll(() => settingsRequests.length).toBe(1);
+  expect(settingsRequests[0]).toMatchObject({
+    location: "Atomic clinic",
+    windows: expect.arrayContaining([
+      expect.objectContaining({
+        active: true,
+        endMinute: 960,
+        startMinute: 540,
+        weekday: 1,
+      }),
+    ]),
+  });
+  expect(splitProfileRequest).toBe(false);
+  expect(splitAvailabilityRequest).toBe(false);
+});
+
 test.describe("local timezone booking window", () => {
   test.use({ timezoneId: "America/Los_Angeles" });
 

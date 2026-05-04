@@ -716,11 +716,27 @@ function registerWorkerRoutes(app: FastifyInstance) {
     ),
   });
 
+  const workerSettingsSchema = profileSchema.extend({
+    windows: availabilitySchema.shape.windows,
+  });
+
   const timeOffSchema = z.object({
     startsAt: z.string().datetime(),
     endsAt: z.string().datetime(),
     reason: z.string().trim().max(240).optional(),
   });
+
+  function workerProfileUpdateData(data: z.infer<typeof profileSchema>) {
+    const updateData: Prisma.WorkerProfileUpdateInput = {};
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.bio !== undefined) updateData.bio = data.bio;
+    if (data.location !== undefined) updateData.location = data.location;
+    if (data.timezone !== undefined) updateData.timezone = data.timezone;
+    if (data.appointmentDurationMinutes !== undefined) {
+      updateData.appointmentDurationMinutes = data.appointmentDurationMinutes;
+    }
+    return updateData;
+  }
 
   app.get("/worker/profile", async (request) => {
     const user = await requireRole(request, [Role.WORKER]);
@@ -741,20 +757,64 @@ function registerWorkerRoutes(app: FastifyInstance) {
     return { worker: serializeWorker(worker) };
   });
 
+  app.put("/worker/settings", async (request) => {
+    const user = await requireRole(request, [Role.WORKER]);
+    if (!user.workerProfile) {
+      throw new ApiError(404, "WORKER_PROFILE_MISSING", "Worker profile is missing");
+    }
+    const data = workerSettingsSchema.parse(request.body);
+    const updateData = workerProfileUpdateData(data);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const worker = await tx.workerProfile.update({
+        where: { id: user.workerProfile!.id },
+        data: updateData,
+        include: {
+          user: true,
+          services: {
+            include: {
+              service: true,
+            },
+          },
+        },
+      });
+      await tx.availabilityWindow.deleteMany({
+        where: { workerProfileId: user.workerProfile!.id },
+      });
+      if (data.windows.length) {
+        await tx.availabilityWindow.createMany({
+          data: data.windows.map((window) => ({
+            ...window,
+            workerProfileId: user.workerProfile!.id,
+          })),
+        });
+      }
+      const windows = await tx.availabilityWindow.findMany({
+        where: { workerProfileId: user.workerProfile!.id },
+        orderBy: [{ weekday: "asc" }, { startMinute: "asc" }],
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: "worker.updateSettings",
+          entityType: "workerProfile",
+          entityId: user.workerProfile!.id,
+          metadata: JSON.stringify({ availabilityCount: windows.length }),
+        },
+      });
+      return { windows, worker };
+    });
+
+    return { worker: serializeWorker(result.worker), windows: result.windows };
+  });
+
   app.patch("/worker/profile", async (request) => {
     const user = await requireRole(request, [Role.WORKER]);
     if (!user.workerProfile) {
       throw new ApiError(404, "WORKER_PROFILE_MISSING", "Worker profile is missing");
     }
     const data = profileSchema.parse(request.body);
-    const updateData: Prisma.WorkerProfileUpdateInput = {};
-    if (data.title !== undefined) updateData.title = data.title;
-    if (data.bio !== undefined) updateData.bio = data.bio;
-    if (data.location !== undefined) updateData.location = data.location;
-    if (data.timezone !== undefined) updateData.timezone = data.timezone;
-    if (data.appointmentDurationMinutes !== undefined) {
-      updateData.appointmentDurationMinutes = data.appointmentDurationMinutes;
-    }
+    const updateData = workerProfileUpdateData(data);
     const worker = await prisma.workerProfile.update({
       where: { id: user.workerProfile.id },
       data: updateData,
