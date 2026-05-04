@@ -1375,6 +1375,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 id="booking-tab"
                 onClick={() => switchMainTab("book")}
                 role="tab"
+                tabIndex={activeTab === "book" ? 0 : -1}
                 type="button"
               >
                 {t("booking.title")}
@@ -1391,6 +1392,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 id="appointments-tab"
                 onClick={() => switchMainTab("appointments")}
                 role="tab"
+                tabIndex={activeTab === "appointments" ? 0 : -1}
                 type="button"
               >
                 {t("appointments.myAppointments")}

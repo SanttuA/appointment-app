@@ -111,10 +111,14 @@ test("patients can reach appointments from tabs and the next appointment banner"
   const bookTab = page.getByRole("tab", { name: "Book an appointment" });
   const appointmentsTab = page.getByRole("tab", { name: /My appointments.*2/ });
   await expect(bookTab).toHaveAttribute("aria-selected", "true");
+  await expect(bookTab).toHaveAttribute("tabindex", "0");
   await expect(appointmentsTab).toBeVisible();
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "-1");
 
   await appointmentsTab.click();
   await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "0");
+  await expect(bookTab).toHaveAttribute("tabindex", "-1");
   await expect(page.getByRole("heading", { name: "Upcoming" })).toBeVisible();
   await expect(page.getByTestId("appointment-card-appointment-one")).toBeVisible();
   await expect(page.getByTestId("appointment-card-appointment-two")).toBeVisible();
