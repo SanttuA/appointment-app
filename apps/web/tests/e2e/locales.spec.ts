@@ -115,6 +115,18 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await expect(appointmentsTab).toBeVisible();
   await expect(appointmentsTab).toHaveAttribute("tabindex", "-1");
 
+  await bookTab.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(appointmentsTab).toBeFocused();
+  await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "0");
+  await expect(bookTab).toHaveAttribute("tabindex", "-1");
+  await page.keyboard.press("ArrowLeft");
+  await expect(bookTab).toBeFocused();
+  await expect(bookTab).toHaveAttribute("aria-selected", "true");
+  await expect(bookTab).toHaveAttribute("tabindex", "0");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "-1");
+
   await appointmentsTab.click();
   await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
   await expect(appointmentsTab).toHaveAttribute("tabindex", "0");

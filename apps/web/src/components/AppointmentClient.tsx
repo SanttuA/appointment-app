@@ -602,6 +602,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [serviceNameEn, setServiceNameEn] = useState("");
   const [serviceNameFi, setServiceNameFi] = useState("");
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
+  const bookingTabRef = useRef<HTMLButtonElement>(null);
+  const appointmentsTabRef = useRef<HTMLButtonElement>(null);
   const appointmentCardRefs = useRef(new Map<string, HTMLDivElement>());
   const latestSlotsRequestRef = useRef(0);
 
@@ -889,6 +891,33 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       setActiveTab(tab);
       if (appointmentId) setFocusAppointmentId(appointmentId);
     });
+  }
+
+  function focusMainTab(tab: MainTab) {
+    switchMainTab(tab);
+    window.requestAnimationFrame(() => {
+      const tabRef = tab === "book" ? bookingTabRef : appointmentsTabRef;
+      tabRef.current?.focus();
+    });
+  }
+
+  function handleMainTabKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const nextTab = activeTab === "book" ? "appointments" : "book";
+    let targetTab: MainTab | null = null;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      targetTab = nextTab;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      targetTab = nextTab;
+    } else if (event.key === "Home") {
+      targetTab = "book";
+    } else if (event.key === "End") {
+      targetTab = "appointments";
+    }
+
+    if (!targetTab) return;
+    event.preventDefault();
+    focusMainTab(targetTab);
   }
 
   function setAppointmentCardRef(id: string) {
@@ -1361,6 +1390,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             <div
               aria-label={t("appointments.tabsLabel")}
               className="grid border-b border-[var(--line)] sm:grid-cols-2"
+              onKeyDown={handleMainTabKeyDown}
               role="tablist"
             >
               <button
@@ -1374,6 +1404,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 ].join(" ")}
                 id="booking-tab"
                 onClick={() => switchMainTab("book")}
+                ref={bookingTabRef}
                 role="tab"
                 tabIndex={activeTab === "book" ? 0 : -1}
                 type="button"
@@ -1391,6 +1422,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 ].join(" ")}
                 id="appointments-tab"
                 onClick={() => switchMainTab("appointments")}
+                ref={appointmentsTabRef}
                 role="tab"
                 tabIndex={activeTab === "appointments" ? 0 : -1}
                 type="button"
