@@ -10,9 +10,7 @@ function inputDateFromToday(days: number) {
 function monthDistance(fromDate: string, toDate: string) {
   const from = new Date(`${fromDate}T00:00:00.000Z`);
   const to = new Date(`${toDate}T00:00:00.000Z`);
-  return (
-    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth()
-  );
+  return (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth();
 }
 
 test("renders the English and Finnish entry points", async ({ page }) => {
@@ -43,8 +41,5 @@ test("calendar selection recenters the 14-day date strip", async ({ page }) => {
 
   await page.getByTestId(`calendar-date-${farDate}`).click();
   await expect(page.getByTestId(`strip-date-${farDate}`)).toBeVisible();
-  await expect(page.getByTestId(`strip-date-${farDate}`)).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(page.getByTestId(`strip-date-${farDate}`)).toHaveAttribute("aria-pressed", "true");
 });
