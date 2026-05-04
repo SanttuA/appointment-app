@@ -528,6 +528,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [serviceNameEn, setServiceNameEn] = useState("");
   const [serviceNameFi, setServiceNameFi] = useState("");
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
+  const latestSlotsRequestRef = useRef(0);
 
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
   const selectableServices = servicesForWorker(selectedWorker, services);
@@ -673,6 +674,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   useEffect(() => {
     if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) {
+      latestSlotsRequestRef.current += 1;
       setSlots([]);
       return;
     }
@@ -683,6 +685,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     if (!selectedWorkerId || !selectedWorker) return;
     if (selectedWorkerSupportsService) return;
     setSelectedServiceId(defaultServiceIdForWorker(selectedWorker, services));
+    latestSlotsRequestRef.current += 1;
     setSlots([]);
   }, [
     selectedServiceId,
@@ -751,6 +754,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   async function fetchSlots() {
     if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) return;
+    const requestId = latestSlotsRequestRef.current + 1;
+    latestSlotsRequestRef.current = requestId;
     const from = new Date(`${dateStripStart}T00:00:00.000Z`);
     const to = new Date(from);
     to.setUTCDate(to.getUTCDate() + dateStripDays.length);
@@ -760,9 +765,16 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       to: to.toISOString(),
       includeTaken: "true",
     });
-    const data = await apiRequest<{ slots: Slot[] }>(
-      `/workers/${selectedWorkerId}/slots?${params.toString()}`,
-    );
+    let data: { slots: Slot[] };
+    try {
+      data = await apiRequest<{ slots: Slot[] }>(
+        `/workers/${selectedWorkerId}/slots?${params.toString()}`,
+      );
+    } catch (caught) {
+      if (requestId !== latestSlotsRequestRef.current) return;
+      throw caught;
+    }
+    if (requestId !== latestSlotsRequestRef.current) return;
     setSlots(data.slots);
   }
 

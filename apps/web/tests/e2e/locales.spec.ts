@@ -98,3 +98,73 @@ test("initial slot load uses a service offered by the selected worker", async ({
   await expect.poll(() => supportedSlotRequest).toBe(true);
   expect(invalidSlotRequest).toBe(false);
 });
+
+test("stale slot responses do not overwrite newer filter results", async ({ page }) => {
+  const tomorrow = inputDateFromToday(1);
+  const firstService = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-slow",
+    name: { en: "Slow service", fi: "Hidas palvelu" },
+  };
+  const secondService = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-fast",
+    name: { en: "Fast service", fi: "Nopea palvelu" },
+  };
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: null } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [firstService, secondService] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({
+      json: {
+        workers: [
+          {
+            active: true,
+            appointmentDurationMinutes: 30,
+            id: "worker-one",
+            location: "Main clinic",
+            name: "Dr. Race Condition",
+            services: [firstService, secondService],
+            timezone: "Europe/Helsinki",
+            title: "General practitioner",
+          },
+        ],
+      },
+    });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    const url = new URL(route.request().url());
+    const serviceId = url.searchParams.get("serviceId");
+    if (serviceId === firstService.id) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.fulfill({
+        json: {
+          slots: [
+            {
+              endsAt: `${tomorrow}T09:30:00.000Z`,
+              startsAt: `${tomorrow}T09:00:00.000Z`,
+              status: "AVAILABLE",
+            },
+          ],
+        },
+      });
+      return;
+    }
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+
+  await expect(page.locator("select").nth(1)).toHaveValue(firstService.id);
+  await page.locator("select").nth(1).selectOption(secondService.id);
+  await expect(page.locator("select").nth(1)).toHaveValue(secondService.id);
+  await expect(page.getByText("No times are available for this date.")).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("button", { name: "Book" })).toHaveCount(0);
+});
