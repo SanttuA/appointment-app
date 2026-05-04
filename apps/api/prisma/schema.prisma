@@ -59,6 +59,7 @@ model WorkerProfile {
   user                       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   title                      String
   bio                        String?
+  location                   String               @default("Main clinic")
   timezone                   String               @default("Europe/Helsinki")
   appointmentDurationMinutes Int                  @default(30)
   active                     Boolean              @default(true)

@@ -15,6 +15,7 @@
   "appointments": {
     "cancel": "Cancel",
     "empty": "No appointments yet.",
+    "next": "Next appointment",
     "title": "Appointments"
   },
   "auth": {
@@ -28,11 +29,33 @@
     "signIn": "Sign in"
   },
   "booking": {
+    "addToCalendar": "Add to calendar",
+    "afternoon": "Afternoon",
+    "availabilityFull": "Good availability",
+    "availabilityLimited": "Limited availability",
+    "availabilityUnavailable": "No availability",
     "book": "Book",
+    "calendar": "Calendar",
+    "cancelGuidance": "You can cancel from this app until the cancellation window closes.",
+    "clinician": "Clinician and service",
+    "confirmBook": "Confirm booking",
+    "confirmSubtitle": "Review the details before adding the appointment to your calendar.",
+    "confirmTitle": "Confirm appointment",
+    "confirmedTitle": "Appointment booked",
+    "left": "{count, plural, one {# left} other {# left}}",
+    "location": "Location",
+    "morning": "Morning",
     "noSlots": "No slots loaded. Choose filters and refresh slots.",
+    "noSlotsForDate": "No times are available for this date.",
+    "nextMonth": "Next month",
+    "patient": "Patient",
+    "previousMonth": "Previous month",
     "refreshSlots": "Refresh slots",
+    "selectDate": "Select a date. Dots show availability.",
     "signInToBook": "Sign in or create an account to book this time.",
     "subtitle": "Patients can book available times from healthcare worker schedules.",
+    "taken": "Taken",
+    "time": "Time",
     "title": "Book an appointment"
   },
   "errors": {
@@ -51,6 +74,7 @@
   },
   "fields": {
     "email": "Email",
+    "location": "Location",
     "name": "Name",
     "password": "Password",
     "role": "Role",

@@ -9,6 +9,10 @@ export type Slot = {
   endsAt: Date;
 };
 
+export type ScheduleSlot = Slot & {
+  status: "AVAILABLE" | "TAKEN";
+};
+
 type TimeRange = {
   startsAt: Date;
   endsAt: Date;
@@ -97,7 +101,7 @@ function utcDayStart(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-export function generateSlots(input: {
+type GenerateSlotsInput = {
   from: Date;
   to: Date;
   timeZone: string;
@@ -105,7 +109,9 @@ export function generateSlots(input: {
   availability: Pick<AvailabilityWindow, "weekday" | "startMinute" | "endMinute" | "active">[];
   timeOff: Pick<TimeOff, "startsAt" | "endsAt">[];
   booked: Pick<Appointment, "startsAt" | "endsAt">[];
-}) {
+};
+
+function generateCandidateSlots(input: GenerateSlotsInput) {
   const slots: Slot[] = [];
   const start = utcDayStart(input.from);
   start.setUTCDate(start.getUTCDate() - 1);
@@ -135,7 +141,6 @@ export function generateSlots(input: {
 
         if (startsAt < input.from || endsAt > input.to) continue;
         if (input.timeOff.some((blocked) => overlaps(candidate, blocked))) continue;
-        if (input.booked.some((booked) => overlaps(candidate, booked))) continue;
 
         slots.push(candidate);
       }
@@ -143,4 +148,17 @@ export function generateSlots(input: {
   }
 
   return slots.sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime());
+}
+
+export function generateSlots(input: GenerateSlotsInput) {
+  return generateCandidateSlots(input).filter(
+    (slot) => !input.booked.some((booked) => overlaps(slot, booked)),
+  );
+}
+
+export function generateScheduleSlots(input: GenerateSlotsInput): ScheduleSlot[] {
+  return generateCandidateSlots(input).map((slot) => ({
+    ...slot,
+    status: input.booked.some((booked) => overlaps(slot, booked)) ? "TAKEN" : "AVAILABLE",
+  }));
 }

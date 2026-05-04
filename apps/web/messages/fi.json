@@ -15,6 +15,7 @@
   "appointments": {
     "cancel": "Peru",
     "empty": "Ei ajanvarauksia.",
+    "next": "Seuraava ajanvaraus",
     "title": "Ajanvaraukset"
   },
   "auth": {
@@ -28,11 +29,33 @@
     "signIn": "Kirjaudu sisään"
   },
   "booking": {
+    "addToCalendar": "Lisää kalenteriin",
+    "afternoon": "Iltapäivä",
+    "availabilityFull": "Hyvin aikoja",
+    "availabilityLimited": "Vähän aikoja",
+    "availabilityUnavailable": "Ei aikoja",
     "book": "Varaa",
+    "calendar": "Kalenteri",
+    "cancelGuidance": "Voit perua ajan sovelluksessa, kunnes perumisikkuna sulkeutuu.",
+    "clinician": "Ammattilainen ja palvelu",
+    "confirmBook": "Vahvista varaus",
+    "confirmSubtitle": "Tarkista tiedot ennen ajan lisäämistä kalenteriin.",
+    "confirmTitle": "Vahvista ajanvaraus",
+    "confirmedTitle": "Aika varattu",
+    "left": "{count, plural, one {# jäljellä} other {# jäljellä}}",
+    "location": "Sijainti",
+    "morning": "Aamu",
     "noSlots": "Aikoja ei ole ladattu. Valitse tiedot ja päivitä ajat.",
+    "noSlotsForDate": "Tälle päivälle ei ole vapaita aikoja.",
+    "nextMonth": "Seuraava kuukausi",
+    "patient": "Potilas",
+    "previousMonth": "Edellinen kuukausi",
     "refreshSlots": "Päivitä ajat",
+    "selectDate": "Valitse päivä. Pisteet näyttävät saatavuuden.",
     "signInToBook": "Kirjaudu sisään tai luo tili varataksesi tämän ajan.",
     "subtitle": "Potilaat voivat varata vapaita aikoja työntekijöiden kalentereista.",
+    "taken": "Varattu",
+    "time": "Aika",
     "title": "Varaa aika"
   },
   "errors": {
@@ -51,6 +74,7 @@
   },
   "fields": {
     "email": "Sähköposti",
+    "location": "Sijainti",
     "name": "Nimi",
     "password": "Salasana",
     "role": "Rooli",

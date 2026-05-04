@@ -17,6 +17,7 @@ import { AppointmentStatus, Locale, Role, type Prisma } from "./generated/prisma
 import {
   assertSlotIncrement,
   bookingHorizonDays,
+  generateScheduleSlots,
   generateSlots,
   overlaps,
   patientCancellationCutoffHours,
@@ -93,6 +94,7 @@ function serializeWorker(
     email: worker.user.email,
     title: worker.title,
     bio: worker.bio,
+    location: worker.location,
     timezone: worker.timezone,
     appointmentDurationMinutes: worker.appointmentDurationMinutes,
     active: worker.active && worker.user.active,
@@ -117,6 +119,7 @@ function serializeAppointment(
       name: appointment.workerProfile.user.name,
       email: appointment.workerProfile.user.email,
       title: appointment.workerProfile.title,
+      location: appointment.workerProfile.location,
       timezone: appointment.workerProfile.timezone,
     },
     service: serializeService(appointment.service),
@@ -456,6 +459,7 @@ function registerCatalogRoutes(app: FastifyInstance) {
         serviceId: z.string().min(1),
         from: z.string().datetime(),
         to: z.string().datetime(),
+        includeTaken: z.enum(["true", "false"]).optional(),
       })
       .parse(request.query);
     const from = parseDate(query.from, "FROM_DATE_INVALID");
@@ -498,7 +502,7 @@ function registerCatalogRoutes(app: FastifyInstance) {
       },
     });
 
-    const slots = generateSlots({
+    const slotInput = {
       from,
       to,
       timeZone: worker.timezone,
@@ -506,12 +510,16 @@ function registerCatalogRoutes(app: FastifyInstance) {
       availability: worker.availability,
       timeOff: worker.timeOff,
       booked,
-    });
+    };
+
+    const slots =
+      query.includeTaken === "true" ? generateScheduleSlots(slotInput) : generateSlots(slotInput);
 
     return {
       slots: slots.map((slot) => ({
         startsAt: slot.startsAt,
         endsAt: slot.endsAt,
+        ...("status" in slot ? { status: slot.status } : {}),
       })),
     };
   });
@@ -678,6 +686,7 @@ function registerWorkerRoutes(app: FastifyInstance) {
   const profileSchema = z.object({
     title: z.string().trim().min(1).max(120).optional(),
     bio: z.string().trim().max(1200).nullable().optional(),
+    location: z.string().trim().min(1).max(240).optional(),
     timezone: z.string().trim().min(1).max(80).optional(),
     appointmentDurationMinutes: z.number().int().min(15).max(180).multipleOf(15).optional(),
   });
@@ -741,6 +750,7 @@ function registerWorkerRoutes(app: FastifyInstance) {
     const updateData: Prisma.WorkerProfileUpdateInput = {};
     if (data.title !== undefined) updateData.title = data.title;
     if (data.bio !== undefined) updateData.bio = data.bio;
+    if (data.location !== undefined) updateData.location = data.location;
     if (data.timezone !== undefined) updateData.timezone = data.timezone;
     if (data.appointmentDurationMinutes !== undefined) {
       updateData.appointmentDurationMinutes = data.appointmentDurationMinutes;
@@ -879,6 +889,7 @@ function registerAdminRoutes(app: FastifyInstance) {
     worker: z
       .object({
         title: z.string().trim().min(1).max(120).default("Healthcare worker"),
+        location: z.string().trim().min(1).max(240).default("Main clinic"),
         timezone: z.string().trim().min(1).max(80).default("Europe/Helsinki"),
         appointmentDurationMinutes: z.number().int().min(15).max(180).multipleOf(15).default(30),
         serviceIds: z.array(z.string()).default([]),
@@ -934,6 +945,7 @@ function registerAdminRoutes(app: FastifyInstance) {
       createData.workerProfile = {
         create: {
           title: data.worker?.title ?? "Healthcare worker",
+          location: data.worker?.location ?? "Main clinic",
           timezone: data.worker?.timezone ?? "Europe/Helsinki",
           appointmentDurationMinutes: data.worker?.appointmentDurationMinutes ?? 30,
           services: {
