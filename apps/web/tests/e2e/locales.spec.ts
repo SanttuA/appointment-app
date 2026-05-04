@@ -30,6 +30,120 @@ test("primary page has no obvious accessibility violations", async ({ page }) =>
   expect(results.violations).toEqual([]);
 });
 
+test("patients can reach appointments from tabs and the next appointment banner", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-general",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Main clinic",
+    name: "Dr. Aino Lehto",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const patient = {
+    email: "patient@example.com",
+    id: "patient-user",
+    name: "Patient User",
+    phone: null,
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  const appointments = [
+    {
+      endsAt: "2026-05-07T06:30:00.000Z",
+      id: "appointment-one",
+      patient,
+      service,
+      startsAt: "2026-05-07T06:00:00.000Z",
+      status: "CONFIRMED",
+      worker,
+    },
+    {
+      endsAt: "2026-05-20T07:00:00.000Z",
+      id: "appointment-two",
+      patient,
+      service,
+      startsAt: "2026-05-20T06:30:00.000Z",
+      status: "CONFIRMED",
+      worker,
+    },
+    {
+      endsAt: "2026-04-03T07:30:00.000Z",
+      id: "appointment-past",
+      patient,
+      service,
+      startsAt: "2026-04-03T07:00:00.000Z",
+      status: "COMPLETED",
+      worker,
+    },
+  ];
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: patient } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+
+  const bookTab = page.getByRole("tab", { name: "Book an appointment" });
+  const appointmentsTab = page.getByRole("tab", { name: /My appointments.*2/ });
+  await expect(bookTab).toHaveAttribute("aria-selected", "true");
+  await expect(bookTab).toHaveAttribute("tabindex", "0");
+  await expect(appointmentsTab).toBeVisible();
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "-1");
+
+  await bookTab.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(appointmentsTab).toBeFocused();
+  await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "0");
+  await expect(bookTab).toHaveAttribute("tabindex", "-1");
+  await page.keyboard.press("ArrowLeft");
+  await expect(bookTab).toBeFocused();
+  await expect(bookTab).toHaveAttribute("aria-selected", "true");
+  await expect(bookTab).toHaveAttribute("tabindex", "0");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "-1");
+
+  await appointmentsTab.click();
+  await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(appointmentsTab).toHaveAttribute("tabindex", "0");
+  await expect(bookTab).toHaveAttribute("tabindex", "-1");
+  await expect(page.getByRole("heading", { name: "Upcoming" })).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-one")).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-two")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Past" })).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-past")).toBeVisible();
+  await expect(page.getByText("Select a date. Dots show availability.")).toHaveCount(0);
+
+  await bookTab.click();
+  await page.getByRole("button", { name: /Next appointment/ }).click();
+  await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("appointment-card-appointment-one")).toBeFocused();
+});
+
 test("calendar selection recenters the 14-day date strip", async ({ page }) => {
   await page.goto("/en");
   await expect(page.getByRole("heading", { name: "Healthcare appointments" })).toBeVisible();
@@ -351,6 +465,113 @@ test("booking confirmation uses the context captured when the dialog opened", as
     startsAt: slot.startsAt,
     workerProfileId: worker.id,
   });
+});
+
+test("rescheduling updates the existing appointment instead of creating a new one", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-general",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Main clinic",
+    name: "Dr. Aino Lehto",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const patient = {
+    email: "patient@example.com",
+    id: "patient-user",
+    name: "Patient User",
+    phone: null,
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  const newSlot = {
+    endsAt: "2026-05-07T07:30:00.000Z",
+    startsAt: "2026-05-07T07:00:00.000Z",
+    status: "AVAILABLE",
+  };
+  const originalAppointment = {
+    endsAt: "2026-05-07T06:30:00.000Z",
+    id: "appointment-one",
+    patient,
+    service,
+    startsAt: "2026-05-07T06:00:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
+  const updatedAppointment = {
+    ...originalAppointment,
+    endsAt: newSlot.endsAt,
+    startsAt: newSlot.startsAt,
+  };
+  let currentAppointments = [originalAppointment];
+  let appointmentRequest: Record<string, unknown> | null = null;
+  let createRequestSent = false;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: patient } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    if (route.request().method() === "POST") {
+      createRequestSent = true;
+      await route.fulfill({ status: 500, json: { error: { code: "UNEXPECTED_POST" } } });
+      return;
+    }
+    await route.fulfill({ json: { appointments: currentAppointments } });
+  });
+  await page.route(
+    "http://localhost:4000/appointments/appointment-one/reschedule",
+    async (route) => {
+      appointmentRequest = route.request().postDataJSON() as Record<string, unknown>;
+      currentAppointments = [updatedAppointment];
+      await route.fulfill({ json: { appointment: updatedAppointment } });
+    },
+  );
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [newSlot] } });
+  });
+
+  await page.goto("/en");
+  await page.getByRole("tab", { name: /My appointments/ }).click();
+  await page.getByRole("button", { name: "Reschedule" }).click();
+
+  await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator("select").first()).toHaveValue(worker.id);
+  await expect(page.locator("select").nth(1)).toHaveValue(service.id);
+
+  await page.getByRole("button", { name: /^Reschedule$/ }).click();
+  await expect(page.getByRole("heading", { name: "Confirm reschedule" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm reschedule" }).click();
+
+  await expect.poll(() => appointmentRequest?.startsAt).toBe(newSlot.startsAt);
+  expect(createRequestSent).toBe(false);
+  await expect(page.getByRole("tab", { name: /My appointments/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByTestId("appointment-card-appointment-one")).toContainText("10:00 AM");
+  await expect(page.getByTestId("appointment-card-appointment-one")).toBeFocused();
 });
 
 test.describe("local timezone booking window", () => {

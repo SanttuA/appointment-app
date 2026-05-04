@@ -21,6 +21,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Locale } from "@/i18n/routing";
 
 type Role = "PATIENT" | "WORKER" | "ADMIN";
+type MainTab = "book" | "appointments";
+type AppointmentStatus = "CONFIRMED" | "CANCELED" | "COMPLETED" | "NO_SHOW";
 
 type User = {
   id: string;
@@ -78,12 +80,13 @@ type Appointment = {
   id: string;
   startsAt: string;
   endsAt: string;
-  status: string;
+  status: AppointmentStatus;
   patient: {
     name: string;
     email: string;
   };
   worker: {
+    id: string;
     name: string;
     title: string;
     location: string;
@@ -392,6 +395,7 @@ function workerSupportsService(worker: Worker | undefined, serviceId: string) {
 }
 
 function SlotGroup({
+  actionLabel,
   locale,
   requestBooking,
   saving,
@@ -401,6 +405,7 @@ function SlotGroup({
   user,
   userCanBook,
 }: {
+  actionLabel: string;
   locale: Locale;
   requestBooking: (slot: Slot) => void;
   saving: boolean;
@@ -438,7 +443,7 @@ function SlotGroup({
                   onClick={() => requestBooking(slot)}
                   type="button"
                 >
-                  {t("booking.book")}
+                  {actionLabel}
                 </button>
               )}
             </div>
@@ -576,12 +581,15 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [dateStripStart, setDateStripStart] = useState(bookingMinDate);
   const [selectedDate, setSelectedDate] = useState(bookingMinDate);
   const [calendarMonth, setCalendarMonth] = useState(() => monthStart(bookingMinDate));
+  const [activeTab, setActiveTab] = useState<MainTab>("book");
   const [saving, setSaving] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [pendingBooking, setPendingBooking] = useState<BookingContext | null>(null);
   const [bookingDialogContext, setBookingDialogContext] = useState<BookingContext | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+  const [reschedulingAppointment, setReschedulingAppointment] = useState<Appointment | null>(null);
+  const [focusAppointmentId, setFocusAppointmentId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [workerLocation, setWorkerLocation] = useState("Main clinic");
   const [availabilityStart, setAvailabilityStart] = useState("09:00");
@@ -594,6 +602,9 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [serviceNameEn, setServiceNameEn] = useState("");
   const [serviceNameFi, setServiceNameFi] = useState("");
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
+  const bookingTabRef = useRef<HTMLButtonElement>(null);
+  const appointmentsTabRef = useRef<HTMLButtonElement>(null);
+  const appointmentCardRefs = useRef(new Map<string, HTMLDivElement>());
   const latestSlotsRequestRef = useRef(0);
 
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
@@ -612,20 +623,32 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const profileInitial =
     user?.name.trim().charAt(0).toUpperCase() || user?.email.charAt(0).toUpperCase();
 
-  const upcomingAppointment = useMemo(() => {
-    if (user?.role !== "PATIENT") return null;
+  const upcomingAppointments = useMemo(() => {
     const now = Date.now();
-    return (
-      appointments
-        .filter(
-          (appointment) =>
-            appointment.status === "CONFIRMED" && new Date(appointment.startsAt).getTime() > now,
-        )
-        .sort(
-          (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
-        )[0] ?? null
-    );
-  }, [appointments, user?.role]);
+    return appointments
+      .filter(
+        (appointment) =>
+          appointment.status === "CONFIRMED" && new Date(appointment.startsAt).getTime() > now,
+      )
+      .sort(
+        (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+      );
+  }, [appointments]);
+
+  const pastAppointments = useMemo(() => {
+    const now = Date.now();
+    return appointments
+      .filter(
+        (appointment) =>
+          appointment.status !== "CONFIRMED" || new Date(appointment.startsAt).getTime() <= now,
+      )
+      .sort(
+        (left, right) => new Date(right.startsAt).getTime() - new Date(left.startsAt).getTime(),
+      );
+  }, [appointments]);
+
+  const upcomingAppointment = user?.role === "PATIENT" ? (upcomingAppointments[0] ?? null) : null;
+  const appointmentBadgeCount = upcomingAppointments.length;
 
   const appointmentFormatter = useMemo(
     () => (appointment: Appointment) =>
@@ -697,6 +720,22 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       : "";
   const bookingDialogLocation =
     confirmedAppointment?.worker.location ?? bookingDialogWorker?.location ?? "";
+  const isReschedulingBooking = Boolean(reschedulingAppointment && bookingDialogContext);
+  const slotActionLabel = reschedulingAppointment
+    ? t("appointments.reschedule")
+    : t("booking.book");
+  const slotUserCanBook = reschedulingAppointment ? Boolean(user) : userCanBook;
+  const bookingDialogTitle = confirmedAppointment
+    ? t("booking.confirmedTitle")
+    : isReschedulingBooking
+      ? t("booking.rescheduleConfirmTitle")
+      : t("booking.confirmTitle");
+  const bookingDialogSubtitle = isReschedulingBooking
+    ? t("booking.rescheduleConfirmSubtitle")
+    : t("booking.confirmSubtitle");
+  const bookingDialogGuidance = isReschedulingBooking
+    ? t("booking.rescheduleGuidance")
+    : t("booking.cancelGuidance");
 
   async function loadCatalog() {
     const [serviceData, workerData] = await Promise.all([
@@ -724,6 +763,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       setAppointments(appointmentData.appointments);
     } else {
       setAppointments([]);
+      setReschedulingAppointment(null);
     }
   }
 
@@ -796,6 +836,19 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [authDialogOpen, profileMenuOpen, saving]);
 
+  useEffect(() => {
+    if (activeTab !== "appointments" || !focusAppointmentId) return;
+
+    const focusTimer = window.setTimeout(() => {
+      const card = appointmentCardRefs.current.get(focusAppointmentId);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      card?.focus({ preventScroll: true });
+      setFocusAppointmentId(null);
+    }, 0);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [activeTab, appointments, focusAppointmentId]);
+
   function openAuthDialog(
     mode: "login" | "register" = "login",
     booking: BookingContext | null = null,
@@ -814,6 +867,106 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     setAuthDialogOpen(false);
     setPendingBooking(null);
     setAuthError(null);
+  }
+
+  function updateWithViewTransition(update: () => void) {
+    if (typeof document === "undefined") {
+      update();
+      return;
+    }
+
+    const viewTransitionDocument = document as Document & {
+      startViewTransition?: (callback: () => void) => void;
+    };
+    if (typeof viewTransitionDocument.startViewTransition === "function") {
+      viewTransitionDocument.startViewTransition(update);
+      return;
+    }
+
+    update();
+  }
+
+  function switchMainTab(tab: MainTab, appointmentId?: string) {
+    updateWithViewTransition(() => {
+      setActiveTab(tab);
+      if (appointmentId) setFocusAppointmentId(appointmentId);
+    });
+  }
+
+  function focusMainTab(tab: MainTab) {
+    switchMainTab(tab);
+    window.requestAnimationFrame(() => {
+      const tabRef = tab === "book" ? bookingTabRef : appointmentsTabRef;
+      tabRef.current?.focus();
+    });
+  }
+
+  function handleMainTabKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const nextTab = activeTab === "book" ? "appointments" : "book";
+    let targetTab: MainTab | null = null;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      targetTab = nextTab;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      targetTab = nextTab;
+    } else if (event.key === "Home") {
+      targetTab = "book";
+    } else if (event.key === "End") {
+      targetTab = "appointments";
+    }
+
+    if (!targetTab) return;
+    event.preventDefault();
+    focusMainTab(targetTab);
+  }
+
+  function setAppointmentCardRef(id: string) {
+    return (node: HTMLDivElement | null) => {
+      if (node) {
+        appointmentCardRefs.current.set(id, node);
+      } else {
+        appointmentCardRefs.current.delete(id);
+      }
+    };
+  }
+
+  function appointmentStatusLabel(status: AppointmentStatus) {
+    return t(`appointments.status.${status}`);
+  }
+
+  function appointmentStatusClass(status: AppointmentStatus) {
+    if (status === "CONFIRMED") return "border-teal-200 bg-teal-50 text-teal-800";
+    if (status === "CANCELED") return "border-red-200 bg-red-50 text-red-800";
+    return "border-slate-200 bg-slate-100 text-slate-700";
+  }
+
+  function openAppointmentFromBanner(id: string) {
+    switchMainTab("appointments", id);
+  }
+
+  function startReschedule(appointment: Appointment) {
+    const appointmentDate = formatDateKey(appointment.startsAt, appointment.worker.timezone);
+    const rescheduleDate = clampInputDate(appointmentDate, bookingMinDate, bookingMaxDate);
+
+    updateWithViewTransition(() => {
+      setReschedulingAppointment(appointment);
+      setBookingDialogContext(null);
+      setConfirmedAppointment(null);
+      setSelectedWorkerId(appointment.worker.id);
+      setSelectedServiceId(appointment.service.id);
+      setSelectedDate(rescheduleDate);
+      setCalendarMonth(monthStart(rescheduleDate));
+      setDateStripStart(centerDateStripStart(rescheduleDate, bookingMinDate, bookingMaxDate));
+      setActiveTab("book");
+      setError(null);
+      setNotice(null);
+    });
+  }
+
+  function cancelReschedule() {
+    setReschedulingAppointment(null);
+    setBookingDialogContext(null);
+    setConfirmedAppointment(null);
   }
 
   function selectStripDate(date: string) {
@@ -871,6 +1024,18 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     return data.appointment;
   }
 
+  async function rescheduleAppointment(appointment: Appointment, booking: BookingContext) {
+    const data = await apiRequest<{ appointment: Appointment }>(
+      `/appointments/${appointment.id}/reschedule`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ startsAt: booking.slot.startsAt }),
+      },
+    );
+    await Promise.all([refreshSession(), fetchSlots()]);
+    return data.appointment;
+  }
+
   async function submitAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError(null);
@@ -919,6 +1084,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       await apiRequest("/auth/logout", { method: "POST" });
       setUser(null);
       setAppointments([]);
+      setReschedulingAppointment(null);
       setProfileMenuOpen(false);
     }, t("notices.signedOut"));
   }
@@ -928,6 +1094,18 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }
 
   async function bookSlot(booking: BookingContext) {
+    if (reschedulingAppointment) {
+      const appointmentToReschedule = reschedulingAppointment;
+      await run(async () => {
+        const appointment = await rescheduleAppointment(appointmentToReschedule, booking);
+        setBookingDialogContext(null);
+        setConfirmedAppointment(null);
+        setReschedulingAppointment(null);
+        switchMainTab("appointments", appointment.id);
+      }, t("notices.appointmentRescheduled"));
+      return;
+    }
+
     await run(async () => {
       const appointment = await createAppointment(booking);
       setConfirmedAppointment(appointment);
@@ -940,7 +1118,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       openAuthDialog("login", booking);
       return;
     }
-    if (!userCanBook) {
+    if (!reschedulingAppointment && !userCanBook) {
       setError("FORBIDDEN");
       setNotice(null);
       return;
@@ -962,6 +1140,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
         body: JSON.stringify({ reason: "Canceled by user" }),
       });
       await Promise.all([refreshSession(), fetchSlots()]);
+      if (reschedulingAppointment?.id === id) setReschedulingAppointment(null);
     }, t("notices.appointmentCanceled"));
   }
 
@@ -1024,6 +1203,65 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       setServiceNameFi("");
       await loadCatalog();
     }, t("notices.serviceCreated"));
+  }
+
+  function renderAppointmentCard(appointment: Appointment, history = false) {
+    const showActions = !history && appointment.status === "CONFIRMED";
+
+    return (
+      <div
+        className={[
+          "surface flex flex-col gap-4 border-l-4 p-4 focus:outline-none focus-visible:outline-[3px] focus-visible:outline-offset-[3px] focus-visible:outline-amber-500 md:flex-row md:items-center md:justify-between",
+          history ? "border-l-slate-300 opacity-70" : "border-l-teal-600",
+        ].join(" ")}
+        data-testid={`appointment-card-${appointment.id}`}
+        key={appointment.id}
+        ref={setAppointmentCardRef(appointment.id)}
+        tabIndex={-1}
+      >
+        <div className="min-w-0">
+          <p className="text-lg font-bold">
+            {formatDateTime(appointment.startsAt, locale, appointment.worker.timezone)}
+          </p>
+          <p className="muted mt-1 text-sm">
+            {serviceName(appointment.service, locale)} · {appointment.worker.name} ·{" "}
+            {appointment.worker.location}
+          </p>
+          {user?.role !== "PATIENT" ? (
+            <p className="muted mt-1 text-sm">{appointment.patient.name}</p>
+          ) : null}
+          <span
+            className={[
+              "mt-3 inline-flex rounded-md border px-3 py-1 text-sm font-semibold",
+              appointmentStatusClass(appointment.status),
+            ].join(" ")}
+          >
+            {appointmentStatusLabel(appointment.status)}
+          </span>
+        </div>
+
+        {showActions ? (
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            <button
+              className="btn-secondary"
+              disabled={saving}
+              onClick={() => startReschedule(appointment)}
+              type="button"
+            >
+              {t("appointments.reschedule")}
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={saving}
+              onClick={() => cancelAppointment(appointment.id)}
+              type="button"
+            >
+              {t("appointments.cancel")}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   function errorMessage(code: string) {
@@ -1127,216 +1365,299 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           ) : null}
 
           {upcomingAppointment ? (
-            <section className="flex flex-col gap-3 rounded-md border border-teal-300 bg-teal-50 p-4 text-teal-950 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 aria-hidden="true" className="mt-0.5 text-teal-700" size={22} />
+            <button
+              className="flex w-full flex-col gap-3 rounded-md border border-teal-300 bg-teal-50 p-4 text-left text-teal-950 transition hover:border-teal-500 hover:bg-teal-100 sm:flex-row sm:items-center sm:justify-between"
+              onClick={() => openAppointmentFromBanner(upcomingAppointment.id)}
+              type="button"
+            >
+              <span className="flex items-start gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-700 text-white">
+                  <CheckCircle2 aria-hidden="true" size={22} />
+                </span>
                 <div>
-                  <h2 className="font-bold">{t("appointments.next")}</h2>
+                  <span className="font-bold">{t("appointments.next")}</span>
                   <p className="text-sm">
                     {appointmentFormatter(upcomingAppointment)} ·{" "}
                     {upcomingAppointment.worker.location}
                   </p>
                 </div>
-              </div>
-              <button
-                className="btn-secondary border-teal-300 bg-white text-teal-950"
-                disabled={saving}
-                onClick={() => cancelAppointment(upcomingAppointment.id)}
-                type="button"
-              >
-                {t("appointments.cancel")}
-              </button>
-            </section>
+              </span>
+              <ChevronRight aria-hidden="true" className="shrink-0 text-teal-700" size={22} />
+            </button>
           ) : null}
 
-          <section className="surface min-w-0 overflow-hidden p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="flex items-center gap-2 text-xl font-bold">
-                  <CalendarClock aria-hidden="true" size={22} />
-                  {t("booking.title")}
-                </h2>
-                <p className="muted text-sm">{t("booking.subtitle")}</p>
-              </div>
-              <button className="btn-secondary" onClick={loadSlots} disabled={saving}>
-                {t("booking.refreshSlots")}
+          <section className="surface min-w-0 overflow-hidden">
+            <div
+              aria-label={t("appointments.tabsLabel")}
+              className="grid border-b border-[var(--line)] sm:grid-cols-2"
+              onKeyDown={handleMainTabKeyDown}
+              role="tablist"
+            >
+              <button
+                aria-controls="booking-panel"
+                aria-selected={activeTab === "book"}
+                className={[
+                  "flex min-h-14 items-center justify-center gap-2 border-b border-[var(--line)] px-4 py-3 text-center font-bold transition sm:border-b-0 sm:border-r",
+                  activeTab === "book"
+                    ? "bg-teal-50 text-teal-950"
+                    : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+                ].join(" ")}
+                id="booking-tab"
+                onClick={() => switchMainTab("book")}
+                ref={bookingTabRef}
+                role="tab"
+                tabIndex={activeTab === "book" ? 0 : -1}
+                type="button"
+              >
+                {t("booking.title")}
+              </button>
+              <button
+                aria-controls="appointments-panel"
+                aria-selected={activeTab === "appointments"}
+                className={[
+                  "flex min-h-14 items-center justify-center gap-2 px-4 py-3 text-center font-bold transition",
+                  activeTab === "appointments"
+                    ? "bg-teal-50 text-teal-950"
+                    : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+                ].join(" ")}
+                id="appointments-tab"
+                onClick={() => switchMainTab("appointments")}
+                ref={appointmentsTabRef}
+                role="tab"
+                tabIndex={activeTab === "appointments" ? 0 : -1}
+                type="button"
+              >
+                {t("appointments.myAppointments")}
+                <span
+                  aria-label={t("appointments.badgeLabel", { count: appointmentBadgeCount })}
+                  className="inline-flex min-w-7 justify-center rounded-full bg-teal-100 px-2 py-0.5 text-sm font-bold text-teal-900"
+                >
+                  {appointmentBadgeCount}
+                </span>
               </button>
             </div>
 
-            <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
-              <label className="field min-w-0">
-                <span>{t("fields.worker")}</span>
-                <select
-                  value={selectedWorkerId}
-                  onChange={(event) => {
-                    const worker = workers.find((item) => item.id === event.target.value);
-                    setSelectedWorkerId(event.target.value);
-                    setSelectedServiceId(defaultServiceIdForWorker(worker, services));
-                  }}
-                >
-                  {workers.map((worker) => (
-                    <option key={worker.id} value={worker.id}>
-                      {worker.name} · {worker.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field min-w-0">
-                <span>{t("fields.service")}</span>
-                <select
-                  disabled={!selectableServices.length}
-                  value={selectedServiceId}
-                  onChange={(event) => setSelectedServiceId(event.target.value)}
-                >
-                  {selectableServices.map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {serviceName(service, locale)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            {activeTab === "book" ? (
+              <div aria-labelledby="booking-tab" className="p-5" id="booking-panel" role="tabpanel">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="flex items-center gap-2 text-xl font-bold">
+                      <CalendarClock aria-hidden="true" size={22} />
+                      {t("booking.title")}
+                    </h2>
+                    <p className="muted text-sm">{t("booking.subtitle")}</p>
+                  </div>
+                  <button className="btn-secondary" onClick={loadSlots} disabled={saving}>
+                    {t("booking.refreshSlots")}
+                  </button>
+                </div>
 
-            <div className="mt-5 min-w-0">
-              <p className="muted text-sm font-semibold">{t("booking.selectDate")}</p>
-              <div
-                aria-label={t("booking.selectDate")}
-                className="mt-3 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2"
-                tabIndex={0}
-              >
-                {dateStripDays.map((date) => {
-                  const counts = slotCountsByDate.get(date) ?? { available: 0, total: 0 };
-                  const selected = selectedDate === date;
-                  const unavailable = counts.total === 0;
-                  const limited = counts.available > 0 && counts.available <= 2;
-                  const full = counts.available >= 3;
-                  const weekend = isWeekend(date);
-                  const disabled = unavailable;
-                  return (
-                    <button
-                      aria-pressed={selected}
-                      className={[
-                        "grid min-h-24 w-[5.25rem] shrink-0 gap-1 rounded-md border p-2 text-center transition sm:w-24 sm:p-3",
-                        selected
-                          ? "border-teal-700 bg-teal-50 text-teal-950"
-                          : "border-[var(--line)] bg-white text-[var(--foreground)]",
-                        disabled || weekend ? "opacity-50" : "",
-                      ].join(" ")}
-                      disabled={disabled}
-                      data-testid={`strip-date-${date}`}
-                      key={date}
-                      aria-label={fullDateLabel(date, locale)}
-                      onClick={() => selectStripDate(date)}
-                      type="button"
-                    >
-                      <span className="text-xs font-bold uppercase">
-                        {weekdayLabel(date, locale)}
-                      </span>
-                      <span className="text-2xl font-bold">{dayNumber(date)}</span>
-                      <span
-                        aria-label={
-                          full
-                            ? t("booking.availabilityFull")
-                            : limited
-                              ? t("booking.availabilityLimited")
-                              : t("booking.availabilityUnavailable")
-                        }
-                        className={[
-                          "mx-auto h-2.5 w-2.5 rounded-full",
-                          full ? "bg-teal-600" : limited ? "bg-amber-500" : "bg-slate-400",
-                        ].join(" ")}
-                      />
-                      {limited ? (
-                        <span className="text-xs font-semibold text-amber-800">
-                          {t("booking.left", { count: counts.available })}
-                        </span>
-                      ) : null}
+                {reschedulingAppointment ? (
+                  <div className="mt-5 flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-bold">{t("booking.rescheduling")}</p>
+                      <p className="text-sm">
+                        {appointmentFormatter(reschedulingAppointment)} ·{" "}
+                        {reschedulingAppointment.worker.location}
+                      </p>
+                    </div>
+                    <button className="btn-secondary" onClick={cancelReschedule} type="button">
+                      {t("booking.cancelReschedule")}
                     </button>
-                  );
-                })}
+                  </div>
+                ) : null}
+
+                <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
+                  <label className="field min-w-0">
+                    <span>{t("fields.worker")}</span>
+                    <select
+                      disabled={Boolean(reschedulingAppointment)}
+                      value={selectedWorkerId}
+                      onChange={(event) => {
+                        const worker = workers.find((item) => item.id === event.target.value);
+                        setSelectedWorkerId(event.target.value);
+                        setSelectedServiceId(defaultServiceIdForWorker(worker, services));
+                      }}
+                    >
+                      {workers.map((worker) => (
+                        <option key={worker.id} value={worker.id}>
+                          {worker.name} · {worker.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field min-w-0">
+                    <span>{t("fields.service")}</span>
+                    <select
+                      disabled={!selectableServices.length || Boolean(reschedulingAppointment)}
+                      value={selectedServiceId}
+                      onChange={(event) => setSelectedServiceId(event.target.value)}
+                    >
+                      {selectableServices.map((service) => (
+                        <option key={service.id} value={service.id}>
+                          {serviceName(service, locale)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-5 min-w-0">
+                  <p className="muted text-sm font-semibold">{t("booking.selectDate")}</p>
+                  <div
+                    aria-label={t("booking.selectDate")}
+                    className="mt-3 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2"
+                    tabIndex={0}
+                  >
+                    {dateStripDays.map((date) => {
+                      const counts = slotCountsByDate.get(date) ?? { available: 0, total: 0 };
+                      const selected = selectedDate === date;
+                      const unavailable = counts.total === 0;
+                      const limited = counts.available > 0 && counts.available <= 2;
+                      const full = counts.available >= 3;
+                      const weekend = isWeekend(date);
+                      const disabled = unavailable;
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={[
+                            "grid min-h-24 w-[5.25rem] shrink-0 gap-1 rounded-md border p-2 text-center transition sm:w-24 sm:p-3",
+                            selected
+                              ? "border-teal-700 bg-teal-50 text-teal-950"
+                              : "border-[var(--line)] bg-white text-[var(--foreground)]",
+                            disabled || weekend ? "opacity-50" : "",
+                          ].join(" ")}
+                          disabled={disabled}
+                          data-testid={`strip-date-${date}`}
+                          key={date}
+                          aria-label={fullDateLabel(date, locale)}
+                          onClick={() => selectStripDate(date)}
+                          type="button"
+                        >
+                          <span className="text-xs font-bold uppercase">
+                            {weekdayLabel(date, locale)}
+                          </span>
+                          <span className="text-2xl font-bold">{dayNumber(date)}</span>
+                          <span
+                            aria-label={
+                              full
+                                ? t("booking.availabilityFull")
+                                : limited
+                                  ? t("booking.availabilityLimited")
+                                  : t("booking.availabilityUnavailable")
+                            }
+                            className={[
+                              "mx-auto h-2.5 w-2.5 rounded-full",
+                              full ? "bg-teal-600" : limited ? "bg-amber-500" : "bg-slate-400",
+                            ].join(" ")}
+                          />
+                          {limited ? (
+                            <span className="text-xs font-semibold text-amber-800">
+                              {t("booking.left", { count: counts.available })}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
+                  <DatePickerCalendar
+                    bookingMaxDate={bookingMaxDate}
+                    bookingMinDate={bookingMinDate}
+                    calendarMonth={calendarMonth}
+                    locale={locale}
+                    selectCalendarDate={selectCalendarDate}
+                    selectedDate={selectedDate}
+                    setCalendarMonth={setCalendarMonth}
+                    slotCountsByDate={slotCountsByDate}
+                  />
+
+                  <div className="grid min-w-0 gap-5">
+                    {slotsForSelectedDate.length ? (
+                      <>
+                        {morningSlots.length ? (
+                          <SlotGroup
+                            actionLabel={slotActionLabel}
+                            locale={locale}
+                            requestBooking={requestBooking}
+                            saving={saving}
+                            slots={morningSlots}
+                            timeZone={selectedWorker?.timezone}
+                            title={t("booking.morning")}
+                            user={user}
+                            userCanBook={slotUserCanBook}
+                          />
+                        ) : null}
+                        {afternoonSlots.length ? (
+                          <SlotGroup
+                            actionLabel={slotActionLabel}
+                            locale={locale}
+                            requestBooking={requestBooking}
+                            saving={saving}
+                            slots={afternoonSlots}
+                            timeZone={selectedWorker?.timezone}
+                            title={t("booking.afternoon")}
+                            user={user}
+                            userCanBook={slotUserCanBook}
+                          />
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="muted text-sm">{t("booking.noSlotsForDate")}</p>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div
+                aria-labelledby="appointments-tab"
+                className="grid gap-6 p-5"
+                id="appointments-panel"
+                role="tabpanel"
+              >
+                <div>
+                  <h2 className="text-xl font-bold">{t("appointments.myAppointments")}</h2>
+                  <p className="muted text-sm">{t("appointments.subtitle")}</p>
+                </div>
 
-            <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
-              <DatePickerCalendar
-                bookingMaxDate={bookingMaxDate}
-                bookingMinDate={bookingMinDate}
-                calendarMonth={calendarMonth}
-                locale={locale}
-                selectCalendarDate={selectCalendarDate}
-                selectedDate={selectedDate}
-                setCalendarMonth={setCalendarMonth}
-                slotCountsByDate={slotCountsByDate}
-              />
-
-              <div className="grid min-w-0 gap-5">
-                {slotsForSelectedDate.length ? (
+                {appointments.length ? (
                   <>
-                    {morningSlots.length ? (
-                      <SlotGroup
-                        locale={locale}
-                        requestBooking={requestBooking}
-                        saving={saving}
-                        slots={morningSlots}
-                        timeZone={selectedWorker?.timezone}
-                        title={t("booking.morning")}
-                        user={user}
-                        userCanBook={userCanBook}
-                      />
-                    ) : null}
-                    {afternoonSlots.length ? (
-                      <SlotGroup
-                        locale={locale}
-                        requestBooking={requestBooking}
-                        saving={saving}
-                        slots={afternoonSlots}
-                        timeZone={selectedWorker?.timezone}
-                        title={t("booking.afternoon")}
-                        user={user}
-                        userCanBook={userCanBook}
-                      />
+                    <section>
+                      <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
+                        {t("appointments.upcoming")}
+                      </h3>
+                      <div className="mt-3 grid gap-3">
+                        {upcomingAppointments.length ? (
+                          upcomingAppointments.map((appointment) =>
+                            renderAppointmentCard(appointment),
+                          )
+                        ) : (
+                          <p className="muted text-sm">{t("appointments.noUpcoming")}</p>
+                        )}
+                      </div>
+                    </section>
+
+                    {pastAppointments.length ? (
+                      <section>
+                        <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
+                          {t("appointments.past")}
+                        </h3>
+                        <div className="mt-3 grid gap-3">
+                          {pastAppointments.map((appointment) =>
+                            renderAppointmentCard(appointment, true),
+                          )}
+                        </div>
+                      </section>
                     ) : null}
                   </>
-                ) : (
-                  <p className="muted text-sm">{t("booking.noSlotsForDate")}</p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          {user ? (
-            <section className="surface p-5">
-              <h2 className="text-xl font-bold">{t("appointments.title")}</h2>
-              <div className="mt-4 grid gap-3">
-                {appointments.length ? (
-                  appointments.map((appointment) => (
-                    <div
-                      className="surface flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
-                      key={appointment.id}
-                    >
-                      <div>
-                        <p className="font-semibold">{appointmentFormatter(appointment)}</p>
-                        <p className="muted text-sm">
-                          {appointment.status} · {appointment.patient.name}
-                        </p>
-                      </div>
-                      {appointment.status === "CONFIRMED" ? (
-                        <button
-                          className="btn-secondary"
-                          disabled={saving}
-                          onClick={() => cancelAppointment(appointment.id)}
-                        >
-                          {t("appointments.cancel")}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))
                 ) : (
                   <p className="muted text-sm">{t("appointments.empty")}</p>
                 )}
               </div>
-            </section>
-          ) : null}
+            )}
+          </section>
 
           {user?.role === "WORKER" ? (
             <section className="surface p-5">
@@ -1496,9 +1817,9 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold" id="booking-dialog-title">
-                  {confirmedAppointment ? t("booking.confirmedTitle") : t("booking.confirmTitle")}
+                  {bookingDialogTitle}
                 </h2>
-                <p className="muted mt-1 text-sm">{t("booking.confirmSubtitle")}</p>
+                <p className="muted mt-1 text-sm">{bookingDialogSubtitle}</p>
               </div>
               <button
                 aria-label={t("auth.close")}
@@ -1535,7 +1856,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
               </div>
             </dl>
 
-            <p className="muted mt-4 text-sm">{t("booking.cancelGuidance")}</p>
+            <p className="muted mt-4 text-sm">{bookingDialogGuidance}</p>
 
             {confirmedAppointment && calendarDownloadHref ? (
               <a
@@ -1553,7 +1874,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 onClick={() => bookingDialogContext && bookSlot(bookingDialogContext)}
                 type="button"
               >
-                {t("booking.confirmBook")}
+                {isReschedulingBooking ? t("booking.confirmReschedule") : t("booking.confirmBook")}
               </button>
             )}
           </section>

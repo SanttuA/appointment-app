@@ -13,10 +13,24 @@
     "title": "Terveydenhuollon ajanvaraus"
   },
   "appointments": {
+    "badgeLabel": "{count, plural, one {# tuleva ajanvaraus} other {# tulevaa ajanvarausta}}",
     "cancel": "Peru",
     "empty": "Ei ajanvarauksia.",
+    "myAppointments": "Omat ajanvaraukset",
     "next": "Seuraava ajanvaraus",
-    "title": "Ajanvaraukset"
+    "noUpcoming": "Ei tulevia ajanvarauksia.",
+    "past": "Menneet",
+    "reschedule": "Vaihda aikaa",
+    "status": {
+      "CANCELED": "Peruttu",
+      "COMPLETED": "Toteutunut",
+      "CONFIRMED": "Vahvistettu",
+      "NO_SHOW": "Ei saapunut"
+    },
+    "subtitle": "Tarkista tulevat ajanvaraukset ja aiemmat käynnit.",
+    "tabsLabel": "Ajanvarauksen työtila",
+    "title": "Ajanvaraukset",
+    "upcoming": "Tulevat"
   },
   "auth": {
     "account": "Tili",
@@ -42,6 +56,8 @@
     "confirmSubtitle": "Tarkista tiedot ennen ajan lisäämistä kalenteriin.",
     "confirmTitle": "Vahvista ajanvaraus",
     "confirmedTitle": "Aika varattu",
+    "cancelReschedule": "Keskeytä ajan vaihto",
+    "confirmReschedule": "Vahvista ajan vaihto",
     "left": "{count, plural, one {# jäljellä} other {# jäljellä}}",
     "location": "Sijainti",
     "morning": "Aamu",
@@ -51,6 +67,10 @@
     "patient": "Potilas",
     "previousMonth": "Edellinen kuukausi",
     "refreshSlots": "Päivitä ajat",
+    "rescheduleConfirmSubtitle": "Tarkista uusi aika ennen ajanvarauksen muuttamista.",
+    "rescheduleConfirmTitle": "Vahvista ajan vaihto",
+    "rescheduleGuidance": "Nykyinen palvelu ja ammattilainen pysyvät samana.",
+    "rescheduling": "Aikaa vaihdetaan",
     "selectDate": "Valitse päivä. Pisteet näyttävät saatavuuden.",
     "signInToBook": "Kirjaudu sisään tai luo tili varataksesi tämän ajan.",
     "subtitle": "Potilaat voivat varata vapaita aikoja työntekijöiden kalentereista.",
@@ -62,6 +82,7 @@
     "AUTH_REQUIRED": "Kirjaudu ensin sisään.",
     "BOOKING_WINDOW_INVALID": "Valittu aika on varausikkunan ulkopuolella.",
     "CANCELLATION_WINDOW_CLOSED": "Tätä aikaa ei voi enää perua.",
+    "CHANGE_WINDOW_CLOSED": "Tätä aikaa ei voi enää muuttaa.",
     "EMAIL_ALREADY_REGISTERED": "Sähköposti on jo rekisteröity.",
     "FORBIDDEN": "Sinulla ei ole oikeutta tähän toimintoon.",
     "INVALID_CREDENTIALS": "Sähköposti tai salasana on virheellinen.",
@@ -70,6 +91,7 @@
     "REQUEST_FAILED": "Pyyntö epäonnistui.",
     "SERVICE_NOT_AVAILABLE": "Valittu palvelu ei ole saatavilla tältä työntekijältä.",
     "SLOT_UNAVAILABLE": "Valittu aika ei ole enää saatavilla.",
+    "START_DATE_INVALID": "Valitse kelvollinen ajanvarausaika.",
     "VALIDATION_FAILED": "Tarkista lomakkeen kentät ja yritä uudelleen."
   },
   "fields": {
@@ -88,6 +110,7 @@
   "notices": {
     "appointmentBooked": "Aika varattu.",
     "appointmentCanceled": "Aika peruttu.",
+    "appointmentRescheduled": "Aika vaihdettu.",
     "availabilitySaved": "Saatavuus tallennettu.",
     "serviceCreated": "Palvelu luotu.",
     "signedIn": "Kirjauduttu sisään.",

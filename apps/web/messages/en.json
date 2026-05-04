@@ -13,10 +13,24 @@
     "title": "Healthcare appointments"
   },
   "appointments": {
+    "badgeLabel": "{count, plural, one {# upcoming appointment} other {# upcoming appointments}}",
     "cancel": "Cancel",
     "empty": "No appointments yet.",
+    "myAppointments": "My appointments",
     "next": "Next appointment",
-    "title": "Appointments"
+    "noUpcoming": "No upcoming appointments.",
+    "past": "Past",
+    "reschedule": "Reschedule",
+    "status": {
+      "CANCELED": "Canceled",
+      "COMPLETED": "Completed",
+      "CONFIRMED": "Confirmed",
+      "NO_SHOW": "No-show"
+    },
+    "subtitle": "Review upcoming appointments and previous visits.",
+    "tabsLabel": "Appointment workspace",
+    "title": "Appointments",
+    "upcoming": "Upcoming"
   },
   "auth": {
     "account": "Account",
@@ -42,6 +56,8 @@
     "confirmSubtitle": "Review the details before adding the appointment to your calendar.",
     "confirmTitle": "Confirm appointment",
     "confirmedTitle": "Appointment booked",
+    "cancelReschedule": "Cancel reschedule",
+    "confirmReschedule": "Confirm reschedule",
     "left": "{count, plural, one {# left} other {# left}}",
     "location": "Location",
     "morning": "Morning",
@@ -51,6 +67,10 @@
     "patient": "Patient",
     "previousMonth": "Previous month",
     "refreshSlots": "Refresh slots",
+    "rescheduleConfirmSubtitle": "Review the new time before changing this appointment.",
+    "rescheduleConfirmTitle": "Confirm reschedule",
+    "rescheduleGuidance": "The existing appointment will keep its service and clinician.",
+    "rescheduling": "Rescheduling appointment",
     "selectDate": "Select a date. Dots show availability.",
     "signInToBook": "Sign in or create an account to book this time.",
     "subtitle": "Patients can book available times from healthcare worker schedules.",
@@ -62,6 +82,7 @@
     "AUTH_REQUIRED": "Please sign in first.",
     "BOOKING_WINDOW_INVALID": "The selected time is outside the booking window.",
     "CANCELLATION_WINDOW_CLOSED": "This appointment can no longer be canceled.",
+    "CHANGE_WINDOW_CLOSED": "This appointment can no longer be changed.",
     "EMAIL_ALREADY_REGISTERED": "That email is already registered.",
     "FORBIDDEN": "You do not have permission for that action.",
     "INVALID_CREDENTIALS": "Invalid email or password.",
@@ -70,6 +91,7 @@
     "REQUEST_FAILED": "The request failed.",
     "SERVICE_NOT_AVAILABLE": "The selected service is not available for this worker.",
     "SLOT_UNAVAILABLE": "That slot is no longer available.",
+    "START_DATE_INVALID": "Choose a valid appointment time.",
     "VALIDATION_FAILED": "Check the form fields and try again."
   },
   "fields": {
@@ -88,6 +110,7 @@
   "notices": {
     "appointmentBooked": "Appointment booked.",
     "appointmentCanceled": "Appointment canceled.",
+    "appointmentRescheduled": "Appointment rescheduled.",
     "availabilitySaved": "Availability saved.",
     "serviceCreated": "Service created.",
     "signedIn": "Signed in.",
