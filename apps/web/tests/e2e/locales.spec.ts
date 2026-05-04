@@ -4,7 +4,10 @@ import { expect, test } from "@playwright/test";
 function inputDateFromToday(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function monthDistance(fromDate: string, toDate: string) {
@@ -167,4 +170,55 @@ test("stale slot responses do not overwrite newer filter results", async ({ page
   await expect(page.getByText("No times are available for this date.")).toBeVisible();
   await page.waitForTimeout(500);
   await expect(page.getByRole("button", { name: "Book" })).toHaveCount(0);
+});
+
+test.describe("local timezone booking window", () => {
+  test.use({ timezoneId: "America/Los_Angeles" });
+
+  test("uses local tomorrow as the first selectable calendar date", async ({ page }) => {
+    const service = {
+      active: true,
+      description: { en: null, fi: null },
+      id: "service-local-time",
+      name: { en: "Local time service", fi: "Paikallinen palvelu" },
+    };
+
+    await page.clock.setFixedTime(new Date("2026-05-05T03:30:00.000Z"));
+    await page.route("http://localhost:4000/auth/me", async (route) => {
+      await route.fulfill({ json: { user: null } });
+    });
+    await page.route("http://localhost:4000/services", async (route) => {
+      await route.fulfill({ json: { services: [service] } });
+    });
+    await page.route("http://localhost:4000/workers", async (route) => {
+      await route.fulfill({
+        json: {
+          workers: [
+            {
+              active: true,
+              appointmentDurationMinutes: 30,
+              id: "worker-one",
+              location: "Main clinic",
+              name: "Dr. Local Time",
+              services: [service],
+              timezone: "America/Los_Angeles",
+              title: "General practitioner",
+            },
+          ],
+        },
+      });
+    });
+    await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+      await route.fulfill({ json: { slots: [] } });
+    });
+
+    await page.goto("/en");
+
+    await expect(page.getByTestId("calendar-date-2026-05-04")).toBeDisabled();
+    await expect(page.getByTestId("calendar-date-2026-05-05")).toBeEnabled();
+    await expect(page.getByTestId("calendar-date-2026-05-05")).toHaveAttribute(
+      "aria-current",
+      "date",
+    );
+  });
 });
