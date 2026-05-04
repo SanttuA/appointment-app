@@ -313,6 +313,18 @@ function roleLabel(role: Role, t: ReturnType<typeof useTranslations>) {
   return t("roles.patient");
 }
 
+function servicesForWorker(worker: Worker | undefined, fallbackServices: Service[]) {
+  return worker ? worker.services : fallbackServices;
+}
+
+function defaultServiceIdForWorker(worker: Worker | undefined, fallbackServices: Service[]) {
+  return servicesForWorker(worker, fallbackServices)[0]?.id ?? "";
+}
+
+function workerSupportsService(worker: Worker | undefined, serviceId: string) {
+  return Boolean(serviceId && worker?.services.some((service) => service.id === serviceId));
+}
+
 function SlotGroup({
   locale,
   requestBooking,
@@ -518,7 +530,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
 
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
-  const selectableServices = selectedWorker?.services.length ? selectedWorker.services : services;
+  const selectableServices = servicesForWorker(selectedWorker, services);
+  const selectedWorkerSupportsService = workerSupportsService(selectedWorker, selectedServiceId);
   const selectedService =
     selectableServices.find((service) => service.id === selectedServiceId) ??
     services.find((service) => service.id === selectedServiceId);
@@ -615,8 +628,15 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     ]);
     setServices(serviceData.services);
     setWorkers(workerData.workers);
-    setSelectedWorkerId((current) => current || workerData.workers[0]?.id || "");
-    setSelectedServiceId((current) => current || serviceData.services[0]?.id || "");
+    const fallbackWorker = workerData.workers[0];
+    const nextWorker =
+      workerData.workers.find((worker) => worker.id === selectedWorkerId) ?? fallbackWorker;
+    const nextServiceId = workerSupportsService(nextWorker, selectedServiceId)
+      ? selectedServiceId
+      : defaultServiceIdForWorker(nextWorker, serviceData.services);
+
+    setSelectedWorkerId(nextWorker?.id ?? "");
+    setSelectedServiceId(nextServiceId);
   }
 
   async function refreshSession() {
@@ -652,12 +672,25 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }, []);
 
   useEffect(() => {
-    if (!selectedWorkerId || !selectedServiceId) {
+    if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) {
       setSlots([]);
       return;
     }
     void run(fetchSlots);
-  }, [dateStripStart, selectedServiceId, selectedWorkerId]);
+  }, [dateStripStart, selectedServiceId, selectedWorkerId, selectedWorkerSupportsService]);
+
+  useEffect(() => {
+    if (!selectedWorkerId || !selectedWorker) return;
+    if (selectedWorkerSupportsService) return;
+    setSelectedServiceId(defaultServiceIdForWorker(selectedWorker, services));
+    setSlots([]);
+  }, [
+    selectedServiceId,
+    selectedWorker,
+    selectedWorkerId,
+    selectedWorkerSupportsService,
+    services,
+  ]);
 
   useEffect(() => {
     if (user?.workerProfile?.location) {
@@ -717,7 +750,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }
 
   async function fetchSlots() {
-    if (!selectedWorkerId || !selectedServiceId) return;
+    if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) return;
     const from = new Date(`${dateStripStart}T00:00:00.000Z`);
     const to = new Date(from);
     to.setUTCDate(to.getUTCDate() + dateStripDays.length);
@@ -1050,7 +1083,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                   onChange={(event) => {
                     const worker = workers.find((item) => item.id === event.target.value);
                     setSelectedWorkerId(event.target.value);
-                    setSelectedServiceId(worker?.services[0]?.id ?? services[0]?.id ?? "");
+                    setSelectedServiceId(defaultServiceIdForWorker(worker, services));
                   }}
                 >
                   {workers.map((worker) => (
@@ -1063,6 +1096,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
               <label className="field min-w-0">
                 <span>{t("fields.service")}</span>
                 <select
+                  disabled={!selectableServices.length}
                   value={selectedServiceId}
                   onChange={(event) => setSelectedServiceId(event.target.value)}
                 >
