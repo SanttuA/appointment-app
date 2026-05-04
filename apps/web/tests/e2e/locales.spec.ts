@@ -253,6 +253,106 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
   expect(splitAvailabilityRequest).toBe(false);
 });
 
+test("booking confirmation uses the context captured when the dialog opened", async ({ page }) => {
+  const tomorrow = inputDateFromToday(1);
+  const firstService = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-original",
+    name: { en: "Original service", fi: "Alkuperäinen palvelu" },
+  };
+  const secondService = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-changed",
+    name: { en: "Changed service", fi: "Vaihdettu palvelu" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Main clinic",
+    name: "Dr. Stable Context",
+    services: [firstService, secondService],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const slot = {
+    endsAt: `${tomorrow}T09:30:00.000Z`,
+    startsAt: `${tomorrow}T09:00:00.000Z`,
+    status: "AVAILABLE",
+  };
+  let appointmentRequest: Record<string, unknown> | null = null;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({
+      json: {
+        user: {
+          email: "patient@example.com",
+          id: "patient-user",
+          name: "Patient User",
+          phone: null,
+          preferredLocale: "en",
+          role: "PATIENT",
+          workerProfile: null,
+        },
+      },
+    });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    if (route.request().method() === "POST") {
+      appointmentRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          appointment: {
+            cancellationReason: null,
+            canceledAt: null,
+            endsAt: slot.endsAt,
+            id: "appointment-one",
+            patient: {
+              email: "patient@example.com",
+              id: "patient-user",
+              name: "Patient User",
+              phone: null,
+              preferredLocale: "en",
+            },
+            service: firstService,
+            startsAt: slot.startsAt,
+            status: "CONFIRMED",
+            worker,
+          },
+        },
+      });
+      return;
+    }
+    await route.fulfill({ json: { appointments: [] } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [firstService, secondService] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    const url = new URL(route.request().url());
+    const serviceId = url.searchParams.get("serviceId");
+    await route.fulfill({ json: { slots: serviceId === firstService.id ? [slot] : [] } });
+  });
+
+  await page.goto("/en");
+  await page.getByRole("button", { name: "Book" }).click();
+  await page.locator("select").nth(1).selectOption(secondService.id, { force: true });
+  await expect(page.locator("select").nth(1)).toHaveValue(secondService.id);
+  await page.getByRole("button", { name: "Confirm booking" }).click();
+
+  await expect.poll(() => appointmentRequest?.serviceId).toBe(firstService.id);
+  expect(appointmentRequest).toMatchObject({
+    serviceId: firstService.id,
+    startsAt: slot.startsAt,
+    workerProfileId: worker.id,
+  });
+});
+
 test.describe("local timezone booking window", () => {
   test.use({ timezoneId: "America/Los_Angeles" });
 

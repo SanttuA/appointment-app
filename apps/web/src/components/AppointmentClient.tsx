@@ -68,6 +68,12 @@ type Slot = {
   status?: "AVAILABLE" | "TAKEN";
 };
 
+type BookingContext = {
+  slot: Slot;
+  serviceId: string;
+  workerId: string;
+};
+
 type Appointment = {
   id: string;
   startsAt: string;
@@ -573,8 +579,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [saving, setSaving] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [pendingSlot, setPendingSlot] = useState<Slot | null>(null);
-  const [bookingDialogSlot, setBookingDialogSlot] = useState<Slot | null>(null);
+  const [pendingBooking, setPendingBooking] = useState<BookingContext | null>(null);
+  const [bookingDialogContext, setBookingDialogContext] = useState<BookingContext | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [workerLocation, setWorkerLocation] = useState("Main clinic");
@@ -593,9 +599,6 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
   const selectableServices = servicesForWorker(selectedWorker, services);
   const selectedWorkerSupportsService = workerSupportsService(selectedWorker, selectedServiceId);
-  const selectedService =
-    selectableServices.find((service) => service.id === selectedServiceId) ??
-    services.find((service) => service.id === selectedServiceId);
   const bookingMaxDate = useMemo(
     () => addDays(bookingMinDate, bookingHorizonDays - 1),
     [bookingMinDate],
@@ -667,20 +670,33 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     () => (confirmedAppointment ? calendarHref(confirmedAppointment, locale) : null),
     [confirmedAppointment, locale],
   );
-  const bookingDialogOpen = Boolean(bookingDialogSlot || confirmedAppointment);
+  const bookingDialogWorker = bookingDialogContext
+    ? workers.find((worker) => worker.id === bookingDialogContext.workerId)
+    : undefined;
+  const pendingBookingWorker = pendingBooking
+    ? workers.find((worker) => worker.id === pendingBooking.workerId)
+    : undefined;
+  const bookingDialogSelectedService = bookingDialogContext
+    ? (services.find((service) => service.id === bookingDialogContext.serviceId) ??
+      bookingDialogWorker?.services.find(
+        (service) => service.id === bookingDialogContext.serviceId,
+      ))
+    : undefined;
+  const bookingDialogOpen = Boolean(bookingDialogContext || confirmedAppointment);
   const bookingDialogTime = confirmedAppointment
     ? formatDateTime(confirmedAppointment.startsAt, locale, confirmedAppointment.worker.timezone)
-    : bookingDialogSlot
-      ? formatDateTime(bookingDialogSlot.startsAt, locale, selectedWorker?.timezone)
+    : bookingDialogContext
+      ? formatDateTime(bookingDialogContext.slot.startsAt, locale, bookingDialogWorker?.timezone)
       : "";
-  const bookingDialogClinician = confirmedAppointment?.worker.name ?? selectedWorker?.name ?? "";
+  const bookingDialogClinician =
+    confirmedAppointment?.worker.name ?? bookingDialogWorker?.name ?? "";
   const bookingDialogService = confirmedAppointment
     ? serviceName(confirmedAppointment.service, locale)
-    : selectedService
-      ? serviceName(selectedService, locale)
+    : bookingDialogSelectedService
+      ? serviceName(bookingDialogSelectedService, locale)
       : "";
   const bookingDialogLocation =
-    confirmedAppointment?.worker.location ?? selectedWorker?.location ?? "";
+    confirmedAppointment?.worker.location ?? bookingDialogWorker?.location ?? "";
 
   async function loadCatalog() {
     const [serviceData, workerData] = await Promise.all([
@@ -780,9 +796,12 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [authDialogOpen, profileMenuOpen, saving]);
 
-  function openAuthDialog(mode: "login" | "register" = "login", slot: Slot | null = null) {
+  function openAuthDialog(
+    mode: "login" | "register" = "login",
+    booking: BookingContext | null = null,
+  ) {
     setAuthMode(mode);
-    setPendingSlot(slot);
+    setPendingBooking(booking);
     setAuthError(null);
     setError(null);
     setNotice(null);
@@ -793,7 +812,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   function closeAuthDialog() {
     if (saving) return;
     setAuthDialogOpen(false);
-    setPendingSlot(null);
+    setPendingBooking(null);
     setAuthError(null);
   }
 
@@ -839,13 +858,13 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     setSlots(data.slots);
   }
 
-  async function createAppointment(slot: Slot) {
+  async function createAppointment(booking: BookingContext) {
     const data = await apiRequest<{ appointment: Appointment }>("/appointments", {
       method: "POST",
       body: JSON.stringify({
-        workerProfileId: selectedWorkerId,
-        serviceId: selectedServiceId,
-        startsAt: slot.startsAt,
+        workerProfileId: booking.workerId,
+        serviceId: booking.serviceId,
+        startsAt: booking.slot.startsAt,
       }),
     });
     await Promise.all([refreshSession(), fetchSlots()]);
@@ -877,12 +896,12 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       }
       await refreshSession();
 
-      const slotToBook = pendingSlot;
-      setPendingSlot(null);
+      const bookingToConfirm = pendingBooking;
+      setPendingBooking(null);
       setAuthDialogOpen(false);
 
-      if (slotToBook) {
-        setBookingDialogSlot(slotToBook);
+      if (bookingToConfirm) {
+        setBookingDialogContext(bookingToConfirm);
         setConfirmedAppointment(null);
         setNotice(t("notices.signedIn"));
       } else {
@@ -908,16 +927,17 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     await run(fetchSlots);
   }
 
-  async function bookSlot(slot: Slot) {
+  async function bookSlot(booking: BookingContext) {
     await run(async () => {
-      const appointment = await createAppointment(slot);
+      const appointment = await createAppointment(booking);
       setConfirmedAppointment(appointment);
     }, t("notices.appointmentBooked"));
   }
 
   function requestBooking(slot: Slot) {
+    const booking = { serviceId: selectedServiceId, slot, workerId: selectedWorkerId };
     if (!user) {
-      openAuthDialog("login", slot);
+      openAuthDialog("login", booking);
       return;
     }
     if (!userCanBook) {
@@ -925,13 +945,13 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       setNotice(null);
       return;
     }
-    setBookingDialogSlot(slot);
+    setBookingDialogContext(booking);
     setConfirmedAppointment(null);
   }
 
   function closeBookingDialog() {
     if (saving) return;
-    setBookingDialogSlot(null);
+    setBookingDialogContext(null);
     setConfirmedAppointment(null);
   }
 
@@ -1529,8 +1549,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             ) : (
               <button
                 className="btn-primary mt-5 w-full"
-                disabled={!bookingDialogSlot || saving}
-                onClick={() => bookingDialogSlot && bookSlot(bookingDialogSlot)}
+                disabled={!bookingDialogContext || saving}
+                onClick={() => bookingDialogContext && bookSlot(bookingDialogContext)}
                 type="button"
               >
                 {t("booking.confirmBook")}
@@ -1551,11 +1571,15 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold" id="auth-dialog-title">
-                  {pendingSlot ? t("booking.signInToBook") : t("auth.account")}
+                  {pendingBooking ? t("booking.signInToBook") : t("auth.account")}
                 </h2>
-                {pendingSlot ? (
+                {pendingBooking ? (
                   <p className="muted mt-1 text-sm">
-                    {formatDateTime(pendingSlot.startsAt, locale, selectedWorker?.timezone)}
+                    {formatDateTime(
+                      pendingBooking.slot.startsAt,
+                      locale,
+                      pendingBookingWorker?.timezone,
+                    )}
                   </p>
                 ) : null}
               </div>
