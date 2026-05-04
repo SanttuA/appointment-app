@@ -221,4 +221,51 @@ test.describe("local timezone booking window", () => {
       "date",
     );
   });
+
+  test("aligns slot fetch window to worker-local day boundaries", async ({ page }) => {
+    const service = {
+      active: true,
+      description: { en: null, fi: null },
+      id: "service-worker-boundary",
+      name: { en: "Boundary service", fi: "Rajapalvelu" },
+    };
+    const slotRequests: URL[] = [];
+
+    await page.clock.setFixedTime(new Date("2026-05-05T03:30:00.000Z"));
+    await page.route("http://localhost:4000/auth/me", async (route) => {
+      await route.fulfill({ json: { user: null } });
+    });
+    await page.route("http://localhost:4000/services", async (route) => {
+      await route.fulfill({ json: { services: [service] } });
+    });
+    await page.route("http://localhost:4000/workers", async (route) => {
+      await route.fulfill({
+        json: {
+          workers: [
+            {
+              active: true,
+              appointmentDurationMinutes: 30,
+              id: "worker-one",
+              location: "Main clinic",
+              name: "Dr. Worker Boundary",
+              services: [service],
+              timezone: "America/Los_Angeles",
+              title: "General practitioner",
+            },
+          ],
+        },
+      });
+    });
+    await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+      slotRequests.push(new URL(route.request().url()));
+      await route.fulfill({ json: { slots: [] } });
+    });
+
+    await page.goto("/en");
+
+    await expect
+      .poll(() => slotRequests[0]?.searchParams.get("from"))
+      .toBe("2026-05-05T07:00:00.000Z");
+    expect(slotRequests[0]?.searchParams.get("to")).toBe("2026-05-19T07:00:00.000Z");
+  });
 });

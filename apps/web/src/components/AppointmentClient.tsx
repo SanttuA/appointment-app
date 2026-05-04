@@ -115,6 +115,59 @@ function inputDateToUtcDate(inputDate: string) {
   return new Date(`${inputDate}T00:00:00.000Z`);
 }
 
+function parseInputDate(inputDate: string) {
+  const [year, month, day] = inputDate.split("-").map(Number);
+  return { day: day ?? 1, month: month ?? 1, year: year ?? 1970 };
+}
+
+function timeZoneParts(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZone,
+    year: "numeric",
+  });
+  const entries = formatter
+    .formatToParts(date)
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]);
+  const parts = Object.fromEntries(entries) as Record<Intl.DateTimeFormatPartTypes, number>;
+  return {
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute,
+    month: parts.month,
+    second: parts.second,
+    year: parts.year,
+  };
+}
+
+function getOffsetMinutes(date: Date, timeZone: string) {
+  const parts = timeZoneParts(date, timeZone);
+  const localAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+  return (localAsUtc - date.getTime()) / 60_000;
+}
+
+function inputDateStartInTimeZone(inputDate: string, timeZone: string) {
+  const { day, month, year } = parseInputDate(inputDate);
+  const utcGuess = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+  const firstOffset = getOffsetMinutes(new Date(utcGuess), timeZone);
+  const firstUtc = utcGuess - firstOffset * 60_000;
+  const secondOffset = getOffsetMinutes(new Date(firstUtc), timeZone);
+  return new Date(utcGuess - secondOffset * 60_000);
+}
+
 function addDays(inputDate: string, days: number) {
   const date = inputDateToUtcDate(inputDate);
   date.setUTCDate(date.getUTCDate() + days);
@@ -763,9 +816,10 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) return;
     const requestId = latestSlotsRequestRef.current + 1;
     latestSlotsRequestRef.current = requestId;
-    const from = new Date(`${dateStripStart}T00:00:00.000Z`);
-    const to = new Date(from);
-    to.setUTCDate(to.getUTCDate() + dateStripDays.length);
+    const workerTimeZone = selectedWorker?.timezone;
+    if (!workerTimeZone) return;
+    const from = inputDateStartInTimeZone(dateStripStart, workerTimeZone);
+    const to = inputDateStartInTimeZone(addDays(dateStripStart, dateStripDayCount), workerTimeZone);
     const params = new URLSearchParams({
       serviceId: selectedServiceId,
       from: from.toISOString(),
