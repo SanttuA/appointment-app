@@ -113,6 +113,7 @@ export function serializeUser(user: User | SessionUser) {
         ? {
             id: user.workerProfile.id,
             title: user.workerProfile.title,
+            location: user.workerProfile.location,
             timezone: user.workerProfile.timezone,
             appointmentDurationMinutes: user.workerProfile.appointmentDurationMinutes,
             active: user.workerProfile.active,

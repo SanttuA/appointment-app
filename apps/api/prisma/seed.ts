@@ -103,6 +103,7 @@ async function main() {
     where: { userId: workerUser.id },
     update: {
       title: "General practitioner",
+      location: "Kamppi Health Clinic, Helsinki",
       timezone: "Europe/Helsinki",
       appointmentDurationMinutes: 30,
       active: true,
@@ -111,6 +112,7 @@ async function main() {
       userId: workerUser.id,
       title: "General practitioner",
       bio: "Primary care appointments in English and Finnish.",
+      location: "Kamppi Health Clinic, Helsinki",
       timezone: "Europe/Helsinki",
       appointmentDurationMinutes: 30,
     },
