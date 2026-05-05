@@ -19,9 +19,11 @@ function monthDistance(fromDate: string, toDate: string) {
 test("renders the English and Finnish entry points", async ({ page }) => {
   await page.goto("/en");
   await expect(page.getByRole("heading", { name: "Healthcare appointments" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
   await page.goto("/fi");
   await expect(page.getByRole("heading", { name: "Terveydenhuollon ajanvaraus" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "fi");
 });
 
 test("primary page has no obvious accessibility violations", async ({ page }) => {
