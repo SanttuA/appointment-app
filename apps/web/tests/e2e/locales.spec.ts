@@ -306,7 +306,20 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
     timezone: "Europe/Helsinki",
     title: "General practitioner",
   };
-  const settingsRequests: unknown[] = [];
+  const settingsRequests: Array<{
+    appointmentDurationMinutes?: number;
+    bookingWindowDays?: number;
+    bufferMinutes?: number;
+    location?: string;
+    minimumNoticeMinutes?: number;
+    windows?: Array<{
+      active: boolean;
+      endMinute: number;
+      location: string;
+      startMinute: number;
+      weekday: number;
+    }>;
+  }> = [];
   const windows = [
     {
       active: true,
@@ -357,7 +370,7 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
       await route.fulfill({ json: { timeOff: [], windows, worker } });
       return;
     }
-    settingsRequests.push(route.request().postDataJSON());
+    settingsRequests.push(route.request().postDataJSON() as (typeof settingsRequests)[number]);
     await route.fulfill({ json: { timeOff: [], windows, worker } });
   });
   await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
@@ -368,6 +381,8 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /Today's agenda/ })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
   await page.getByRole("tab", { name: "My schedule" }).click();
+  await expect(page.getByRole("textbox", { name: "From" })).toHaveValue("");
+  await expect(page.getByRole("textbox", { name: "To" })).toHaveValue("");
   await page.getByLabel("Location").first().fill("Atomic clinic");
   await page.getByRole("button", { name: "Save availability" }).click();
 
@@ -378,23 +393,16 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
     bufferMinutes: 0,
     location: "Atomic clinic",
     minimumNoticeMinutes: 0,
-    windows: expect.arrayContaining([
-      expect.objectContaining({
-        active: true,
-        endMinute: 720,
-        location: "Atomic clinic",
-        startMinute: 540,
-        weekday: 1,
-      }),
-      expect.objectContaining({
-        active: true,
-        endMinute: 960,
-        location: "Atomic clinic",
-        startMinute: 750,
-        weekday: 1,
-      }),
-    ]),
   });
+  expect(settingsRequests[0]?.windows).toEqual([
+    {
+      active: true,
+      endMinute: 960,
+      location: "Atomic clinic",
+      startMinute: 540,
+      weekday: 1,
+    },
+  ]);
   expect(splitProfileRequest).toBe(false);
   expect(splitAvailabilityRequest).toBe(false);
 });

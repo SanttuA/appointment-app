@@ -957,6 +957,9 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       const sorted = [...splitDay].sort((left, right) => left.startMinute - right.startMinute);
       setWorkerBreakStart(minuteToTime(sorted[0]?.endMinute ?? 12 * 60));
       setWorkerBreakEnd(minuteToTime(sorted[1]?.startMinute ?? 12 * 60 + 30));
+    } else {
+      setWorkerBreakStart("");
+      setWorkerBreakEnd("");
     }
   }
 
