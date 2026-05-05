@@ -2,8 +2,35 @@ import "dotenv/config";
 import { hashPassword } from "../src/auth.js";
 import { prisma } from "../src/db.js";
 import { AppointmentStatus, Locale, Role } from "../src/generated/prisma/client.js";
+import { zonedTimeToUtc } from "../src/scheduling.js";
 
 const demoPassword = "DemoPassword123!";
+const demoTimezone = "Europe/Helsinki";
+
+function partsInTimeZone(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone,
+    year: "numeric",
+  });
+  const entries = formatter
+    .formatToParts(date)
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]);
+  return Object.fromEntries(entries) as { day: number; month: number; year: number };
+}
+
+function demoLocalTime(dayOffset: number, minuteOfDay: number) {
+  const today = partsInTimeZone(new Date(), demoTimezone);
+  const targetNoon = new Date(Date.UTC(today.year, today.month - 1, today.day + dayOffset, 12));
+  const target = partsInTimeZone(targetNoon, demoTimezone);
+  return zonedTimeToUtc({ ...target, minuteOfDay, timeZone: demoTimezone });
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60_000);
+}
 
 async function main() {
   const [generalPractice, physiotherapy] = await Promise.all([
@@ -104,8 +131,11 @@ async function main() {
     update: {
       title: "General practitioner",
       location: "Kamppi Health Clinic, Helsinki",
-      timezone: "Europe/Helsinki",
-      appointmentDurationMinutes: 30,
+      timezone: demoTimezone,
+      appointmentDurationMinutes: 15,
+      bufferMinutes: 10,
+      bookingWindowDays: 14,
+      minimumNoticeMinutes: 120,
       active: true,
     },
     create: {
@@ -113,8 +143,11 @@ async function main() {
       title: "General practitioner",
       bio: "Primary care appointments in English and Finnish.",
       location: "Kamppi Health Clinic, Helsinki",
-      timezone: "Europe/Helsinki",
-      appointmentDurationMinutes: 30,
+      timezone: demoTimezone,
+      appointmentDurationMinutes: 15,
+      bufferMinutes: 10,
+      bookingWindowDays: 14,
+      minimumNoticeMinutes: 120,
     },
   });
 
@@ -136,13 +169,129 @@ async function main() {
 
   await prisma.availabilityWindow.deleteMany({ where: { workerProfileId: worker.id } });
   await prisma.availabilityWindow.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({
+    data: [
+      { weekday: 1, startMinute: 9 * 60, endMinute: 12 * 60, location: "Main clinic" },
+      { weekday: 1, startMinute: 12 * 60 + 30, endMinute: 16 * 60, location: "Main clinic" },
+      { weekday: 2, startMinute: 10 * 60, endMinute: 17 * 60, location: "East clinic" },
+      { weekday: 3, startMinute: 9 * 60, endMinute: 13 * 60, location: "Main clinic" },
+      { weekday: 4, startMinute: 11 * 60, endMinute: 16 * 60, location: "East clinic" },
+    ].map((window) => ({
+      ...window,
       workerProfileId: worker.id,
-      weekday,
-      startMinute: 9 * 60,
-      endMinute: 16 * 60,
       active: true,
     })),
+  });
+
+  const demoPatients = await Promise.all(
+    [
+      { email: "matti@example.com", name: "Matti Virtanen", phone: "+358 40 123 4567" },
+      { email: "sari@example.com", name: "Sari Korhonen", phone: "+358 50 987 6543" },
+      { email: "juha@example.com", name: "Juha Mäkinen", phone: "+358 44 555 1234" },
+      { email: "liisa@example.com", name: "Liisa Järvinen", phone: null },
+    ].map(({ email, name, phone }) =>
+      prisma.user.upsert({
+        where: { email },
+        update: {
+          passwordHash,
+          role: Role.PATIENT,
+          active: true,
+          name,
+          phone,
+        },
+        create: {
+          email,
+          passwordHash,
+          name,
+          phone,
+          role: Role.PATIENT,
+          preferredLocale: Locale.EN,
+          patientProfile: { create: {} },
+        },
+      }),
+    ),
+  );
+
+  const appointmentInputs = [
+    {
+      id: "demo-appointment-matti-today",
+      patientId: demoPatients[0]!.id,
+      startsAt: demoLocalTime(0, 9 * 60),
+      status: AppointmentStatus.COMPLETED,
+      location: "Main clinic",
+    },
+    {
+      id: "demo-appointment-sari-today",
+      patientId: demoPatients[1]!.id,
+      startsAt: demoLocalTime(0, 9 * 60 + 45),
+      status: AppointmentStatus.CONFIRMED,
+      location: "Main clinic",
+    },
+    {
+      id: "demo-appointment-juha-today",
+      patientId: demoPatients[2]!.id,
+      startsAt: demoLocalTime(0, 11 * 60),
+      status: AppointmentStatus.CONFIRMED,
+      location: "Main clinic",
+    },
+    {
+      id: "demo-appointment-liisa-tomorrow",
+      patientId: demoPatients[3]!.id,
+      startsAt: demoLocalTime(1, 10 * 60),
+      status: AppointmentStatus.CONFIRMED,
+      location: "East clinic",
+    },
+  ];
+
+  for (const input of appointmentInputs) {
+    await prisma.appointment.upsert({
+      where: { id: input.id },
+      update: {
+        patientId: input.patientId,
+        workerProfileId: worker.id,
+        serviceId: generalPractice.id,
+        startsAt: input.startsAt,
+        endsAt: addMinutes(input.startsAt, worker.appointmentDurationMinutes),
+        location: input.location,
+        status: input.status,
+        cancellationReason: null,
+        canceledAt: null,
+        updatedById: admin.id,
+      },
+      create: {
+        id: input.id,
+        patientId: input.patientId,
+        workerProfileId: worker.id,
+        serviceId: generalPractice.id,
+        startsAt: input.startsAt,
+        endsAt: addMinutes(input.startsAt, worker.appointmentDurationMinutes),
+        location: input.location,
+        status: input.status,
+        createdById: input.patientId,
+      },
+    });
+  }
+
+  await prisma.timeOff.deleteMany({
+    where: {
+      workerProfileId: worker.id,
+      reason: { in: ["Lunch break", "Conference leave"] },
+    },
+  });
+  await prisma.timeOff.createMany({
+    data: [
+      {
+        workerProfileId: worker.id,
+        startsAt: demoLocalTime(0, 12 * 60),
+        endsAt: demoLocalTime(0, 12 * 60 + 30),
+        reason: "Lunch break",
+      },
+      {
+        workerProfileId: worker.id,
+        startsAt: demoLocalTime(8, 9 * 60),
+        endsAt: demoLocalTime(8, 16 * 60),
+        reason: "Conference leave",
+      },
+    ],
   });
 
   await prisma.auditLog.create({

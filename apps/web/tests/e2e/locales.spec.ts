@@ -296,14 +296,27 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
   const worker = {
     active: true,
     appointmentDurationMinutes: 30,
+    bufferMinutes: 0,
+    bookingWindowDays: 90,
     id: "worker-one",
     location: "Original clinic",
+    minimumNoticeMinutes: 0,
     name: "Dr. Atomic Settings",
     services: [service],
     timezone: "Europe/Helsinki",
     title: "General practitioner",
   };
   const settingsRequests: unknown[] = [];
+  const windows = [
+    {
+      active: true,
+      endMinute: 960,
+      id: "window-one",
+      location: "Original clinic",
+      startMinute: 540,
+      weekday: 1,
+    },
+  ];
   let splitProfileRequest = false;
   let splitAvailabilityRequest = false;
 
@@ -340,31 +353,225 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
     await route.fulfill({ json: { windows: [] } });
   });
   await page.route("http://localhost:4000/worker/settings", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: { timeOff: [], windows, worker } });
+      return;
+    }
     settingsRequests.push(route.request().postDataJSON());
-    await route.fulfill({ json: { windows: [], worker } });
+    await route.fulfill({ json: { timeOff: [], windows, worker } });
   });
   await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
     await route.fulfill({ json: { slots: [] } });
   });
 
   await page.goto("/en");
-  await page.getByLabel("Location").fill("Atomic clinic");
+  await expect(page.getByRole("tab", { name: /Today's agenda/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "My schedule" }).click();
+  await page.getByLabel("Location").first().fill("Atomic clinic");
   await page.getByRole("button", { name: "Save availability" }).click();
 
   await expect.poll(() => settingsRequests.length).toBe(1);
   expect(settingsRequests[0]).toMatchObject({
+    appointmentDurationMinutes: 30,
+    bookingWindowDays: 90,
+    bufferMinutes: 0,
     location: "Atomic clinic",
+    minimumNoticeMinutes: 0,
     windows: expect.arrayContaining([
       expect.objectContaining({
         active: true,
-        endMinute: 960,
+        endMinute: 720,
+        location: "Atomic clinic",
         startMinute: 540,
+        weekday: 1,
+      }),
+      expect.objectContaining({
+        active: true,
+        endMinute: 960,
+        location: "Atomic clinic",
+        startMinute: 750,
         weekday: 1,
       }),
     ]),
   });
   expect(splitProfileRequest).toBe(false);
   expect(splitAvailabilityRequest).toBe(false);
+});
+
+test("worker agenda shows patient details, status actions, and block time", async ({
+  page,
+}, testInfo) => {
+  if (testInfo.project.name === "chromium") {
+    await page.setViewportSize({ height: 900, width: 1800 });
+  }
+
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-worker-agenda",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 15,
+    bufferMinutes: 10,
+    bookingWindowDays: 14,
+    id: "worker-one",
+    location: "Main clinic",
+    minimumNoticeMinutes: 120,
+    name: "Dr. Worker Agenda",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const patient = {
+    email: "matti@example.com",
+    id: "patient-one",
+    name: "Matti Virtanen",
+    phone: "+358 40 123 4567",
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  const workerUser = {
+    email: "worker@example.com",
+    id: "worker-user",
+    name: "Dr. Worker Agenda",
+    phone: null,
+    preferredLocale: "en",
+    role: "WORKER",
+    workerProfile: worker,
+  };
+  const appointment = {
+    endsAt: "2026-05-04T07:15:00.000Z",
+    id: "appointment-one",
+    location: "Main clinic",
+    patient,
+    service,
+    startsAt: "2026-05-04T07:00:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
+  const longWeekAppointment = {
+    endsAt: "2026-05-07T06:15:00.000Z",
+    id: "appointment-long-week",
+    location: "Kamppi Health Clinic, Helsinki",
+    patient: {
+      ...patient,
+      email: "patient.with.a.long.email.address@example.com",
+      id: "patient-long-week",
+      name: "Patient User",
+      phone: null,
+    },
+    service,
+    startsAt: "2026-05-07T06:00:00.000Z",
+    status: "CANCELED",
+    worker,
+  };
+  let currentAppointments = [appointment, longWeekAppointment];
+  let currentTimeOff: unknown[] = [];
+  let statusRequest: Record<string, unknown> | null = null;
+  let blockRequest: Record<string, unknown> | null = null;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: workerUser } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: currentAppointments } });
+  });
+  await page.route("http://localhost:4000/appointments/appointment-one/status", async (route) => {
+    statusRequest = route.request().postDataJSON() as Record<string, unknown>;
+    currentAppointments = currentAppointments.map((currentAppointment) =>
+      currentAppointment.id === appointment.id
+        ? { ...currentAppointment, status: "COMPLETED" }
+        : currentAppointment,
+    );
+    await route.fulfill({ json: { appointment: currentAppointments[0] } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route("http://localhost:4000/worker/settings", async (route) => {
+    await route.fulfill({
+      json: {
+        timeOff: currentTimeOff,
+        windows: [
+          {
+            active: true,
+            endMinute: 960,
+            id: "window-one",
+            location: "Main clinic",
+            startMinute: 540,
+            weekday: 1,
+          },
+        ],
+        worker,
+      },
+    });
+  });
+  await page.route("http://localhost:4000/worker/time-off", async (route) => {
+    blockRequest = route.request().postDataJSON() as Record<string, unknown>;
+    currentTimeOff = [
+      {
+        endsAt: blockRequest.endsAt,
+        id: "time-off-one",
+        reason: blockRequest.reason,
+        startsAt: blockRequest.startsAt,
+      },
+    ];
+    await route.fulfill({ json: { timeOff: currentTimeOff[0] } });
+  });
+
+  await page.goto("/en");
+
+  await expect(page.getByRole("tab", { name: /Today's agenda/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
+  await expect(page.getByText("Matti Virtanen")).toBeVisible();
+  await expect(page.getByText("+358 40 123 4567")).toBeVisible();
+
+  await page.getByRole("button", { name: "Mark done" }).click();
+  await expect.poll(() => statusRequest?.status).toBe("COMPLETED");
+  await expect(page.getByTestId("worker-appointment-appointment-one")).toContainText("Completed");
+
+  await page.getByRole("tab", { name: "Week view" }).click();
+  await expect(page.getByRole("button", { name: /Block time on/ }).first()).toContainText(
+    "Block time",
+  );
+  const weekLayout = await page
+    .locator('[data-testid^="worker-appointment-"]')
+    .evaluateAll((cards) => {
+      const cardsContained = cards.every((card) => {
+        const day = card.closest("section");
+        if (!day) return false;
+
+        const cardRect = card.getBoundingClientRect();
+        const dayRect = day.getBoundingClientRect();
+        return cardRect.left >= dayRect.left - 1 && cardRect.right <= dayRect.right + 1;
+      });
+
+      return {
+        cardCount: cards.length,
+        cardsContained,
+        pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      };
+    });
+  expect(weekLayout).toEqual({ cardCount: 2, cardsContained: true, pageFits: true });
+
+  await page.getByRole("button", { name: "Block time", exact: true }).click();
+  await page.getByLabel("Reason").fill("Admin time");
+  await page.getByRole("button", { name: "Save block" }).click();
+
+  await expect.poll(() => blockRequest?.reason).toBe("Admin time");
+  await expect(page.getByText("Admin time")).toBeVisible();
 });
 
 test("booking confirmation uses the context captured when the dialog opened", async ({ page }) => {

@@ -2,6 +2,8 @@
 
 import {
   CalendarClock,
+  CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -10,8 +12,11 @@ import {
   Languages,
   LogOut,
   MapPin,
+  Plus,
+  Settings,
   Shield,
   Stethoscope,
+  Trash2,
   UserCircle,
   UserPlus,
   X,
@@ -21,7 +26,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Locale } from "@/i18n/routing";
 
 type Role = "PATIENT" | "WORKER" | "ADMIN";
-type MainTab = "book" | "appointments";
+type PatientTab = "book" | "appointments";
+type WorkerTab = "agenda" | "week" | "schedule";
 type AppointmentStatus = "CONFIRMED" | "CANCELED" | "COMPLETED" | "NO_SHOW";
 
 type User = {
@@ -37,6 +43,9 @@ type User = {
     location: string;
     timezone: string;
     appointmentDurationMinutes: number;
+    bufferMinutes: number;
+    bookingWindowDays: number;
+    minimumNoticeMinutes: number;
     active: boolean;
   };
 };
@@ -60,6 +69,9 @@ type Worker = {
   location: string;
   timezone: string;
   appointmentDurationMinutes: number;
+  bufferMinutes: number;
+  bookingWindowDays: number;
+  minimumNoticeMinutes: number;
   active: boolean;
   services: Service[];
 };
@@ -67,6 +79,7 @@ type Worker = {
 type Slot = {
   startsAt: string;
   endsAt: string;
+  location?: string | null;
   status?: "AVAILABLE" | "TAKEN";
 };
 
@@ -84,6 +97,7 @@ type Appointment = {
   patient: {
     name: string;
     email: string;
+    phone: string | null;
   };
   worker: {
     id: string;
@@ -93,6 +107,31 @@ type Appointment = {
     timezone: string;
   };
   service: Service;
+  location: string | null;
+};
+
+type AvailabilityWindow = {
+  id: string;
+  weekday: number;
+  startMinute: number;
+  endMinute: number;
+  location: string | null;
+  active: boolean;
+};
+
+type TimeOff = {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  reason: string | null;
+};
+
+type WorkerDayForm = {
+  weekday: number;
+  active: boolean;
+  start: string;
+  end: string;
+  location: string;
 };
 
 type ApiErrorBody = {
@@ -106,6 +145,7 @@ const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const bookingHorizonDays = 90;
 const dateStripDayCount = 14;
 const dateStripCenterOffset = 6;
+const scheduleWeekdays = [1, 2, 3, 4, 5, 6, 0];
 
 function formatLocalInputDate(date: Date) {
   const year = date.getFullYear();
@@ -376,6 +416,34 @@ function timeToMinute(value: string) {
   return (hour ?? 0) * 60 + (minute ?? 0);
 }
 
+function minuteToTime(value: number) {
+  const hour = Math.floor(value / 60);
+  const minute = value % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function inputDateMinuteInTimeZone(inputDate: string, minuteOfDay: number, timeZone: string) {
+  const { day, month, year } = parseInputDate(inputDate);
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const firstOffset = getOffsetMinutes(new Date(utcGuess), timeZone);
+  const firstUtc = utcGuess - firstOffset * 60_000;
+  const secondOffset = getOffsetMinutes(new Date(firstUtc), timeZone);
+  return new Date(utcGuess - secondOffset * 60_000);
+}
+
+function weekStartMonday(inputDate: string) {
+  const date = inputDateToUtcDate(inputDate);
+  const offset = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function ceilToSlotStep(minutes: number) {
+  return Math.ceil(minutes / 15) * 15;
+}
+
 function roleLabel(role: Role, t: ReturnType<typeof useTranslations>) {
   if (role === "ADMIN") return t("roles.admin");
   if (role === "WORKER") return t("roles.worker");
@@ -392,6 +460,16 @@ function defaultServiceIdForWorker(worker: Worker | undefined, fallbackServices:
 
 function workerSupportsService(worker: Worker | undefined, serviceId: string) {
   return Boolean(serviceId && worker?.services.some((service) => service.id === serviceId));
+}
+
+function defaultWorkerDayForms(location = "Main clinic"): WorkerDayForm[] {
+  return scheduleWeekdays.map((weekday) => ({
+    weekday,
+    active: weekday >= 1 && weekday <= 5,
+    start: "09:00",
+    end: "16:00",
+    location,
+  }));
 }
 
 function SlotGroup({
@@ -565,6 +643,7 @@ function DatePickerCalendar({
 export function AppointmentClient({ locale }: { locale: Locale }) {
   const t = useTranslations();
   const [user, setUser] = useState<User | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -581,7 +660,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [dateStripStart, setDateStripStart] = useState(bookingMinDate);
   const [selectedDate, setSelectedDate] = useState(bookingMinDate);
   const [calendarMonth, setCalendarMonth] = useState(() => monthStart(bookingMinDate));
-  const [activeTab, setActiveTab] = useState<MainTab>("book");
+  const [activeTab, setActiveTab] = useState<PatientTab>("book");
+  const [workerTab, setWorkerTab] = useState<WorkerTab>("agenda");
   const [saving, setSaving] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -592,9 +672,24 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [focusAppointmentId, setFocusAppointmentId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [workerLocation, setWorkerLocation] = useState("Main clinic");
-  const [availabilityStart, setAvailabilityStart] = useState("09:00");
-  const [availabilityEnd, setAvailabilityEnd] = useState("16:00");
-  const [weekdays, setWeekdays] = useState([1, 2, 3, 4, 5]);
+  const [workerDays, setWorkerDays] = useState<WorkerDayForm[]>(() =>
+    defaultWorkerDayForms("Main clinic"),
+  );
+  const [workerBreakStart, setWorkerBreakStart] = useState("12:00");
+  const [workerBreakEnd, setWorkerBreakEnd] = useState("12:30");
+  const [appointmentDurationMinutes, setAppointmentDurationMinutes] = useState(30);
+  const [bufferMinutes, setBufferMinutes] = useState(0);
+  const [workerBookingWindowDays, setWorkerBookingWindowDays] = useState(90);
+  const [minimumNoticeMinutes, setMinimumNoticeMinutes] = useState(0);
+  const [workerTimeOff, setWorkerTimeOff] = useState<TimeOff[]>([]);
+  const [workerWeekStart, setWorkerWeekStart] = useState(() =>
+    weekStartMonday(formatLocalInputDate(new Date())),
+  );
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [blockDate, setBlockDate] = useState(() => formatLocalInputDate(new Date()));
+  const [blockStart, setBlockStart] = useState("12:00");
+  const [blockEnd, setBlockEnd] = useState("12:30");
+  const [blockReason, setBlockReason] = useState("Lunch break");
   const [adminUserRole, setAdminUserRole] = useState<Role>("WORKER");
   const [adminUserEmail, setAdminUserEmail] = useState("");
   const [adminUserName, setAdminUserName] = useState("");
@@ -736,6 +831,41 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const bookingDialogGuidance = isReschedulingBooking
     ? t("booking.rescheduleGuidance")
     : t("booking.cancelGuidance");
+  const workerTimeZone =
+    user?.workerProfile?.timezone ?? selectedWorker?.timezone ?? "Europe/Helsinki";
+  const workerToday = formatDateKey(new Date(), workerTimeZone);
+  const workerWeekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, index) => addDays(workerWeekStart, index)),
+    [workerWeekStart],
+  );
+  const workerWeekEnd = workerWeekDays.at(-1) ?? workerWeekStart;
+  const todayAgendaAppointments = useMemo(
+    () =>
+      appointments
+        .filter(
+          (appointment) => formatDateKey(appointment.startsAt, workerTimeZone) === workerToday,
+        )
+        .sort(
+          (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+        ),
+    [appointments, workerTimeZone, workerToday],
+  );
+  const weekAppointments = useMemo(
+    () =>
+      appointments.filter((appointment) => {
+        const key = formatDateKey(appointment.startsAt, workerTimeZone);
+        return key >= workerWeekStart && key <= workerWeekEnd;
+      }),
+    [appointments, workerTimeZone, workerWeekEnd, workerWeekStart],
+  );
+  const upcomingTimeOff = useMemo(() => {
+    const now = Date.now();
+    return workerTimeOff
+      .filter((entry) => new Date(entry.endsAt).getTime() >= now)
+      .sort(
+        (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+      );
+  }, [workerTimeOff]);
 
   async function loadCatalog() {
     const [serviceData, workerData] = await Promise.all([
@@ -761,9 +891,15 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     if (data.user) {
       const appointmentData = await apiRequest<{ appointments: Appointment[] }>("/appointments");
       setAppointments(appointmentData.appointments);
+      if (data.user.role === "WORKER") {
+        await loadWorkerSettings();
+      } else {
+        setWorkerTimeOff([]);
+      }
     } else {
       setAppointments([]);
       setReschedulingAppointment(null);
+      setWorkerTimeOff([]);
     }
   }
 
@@ -781,6 +917,62 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     }
   }
 
+  function applyWorkerSettings(data: {
+    worker: Worker;
+    windows: AvailabilityWindow[];
+    timeOff: TimeOff[];
+  }) {
+    setWorkerTimeOff(data.timeOff);
+    setWorkerLocation(data.worker.location);
+    setAppointmentDurationMinutes(data.worker.appointmentDurationMinutes);
+    setBufferMinutes(data.worker.bufferMinutes);
+    setWorkerBookingWindowDays(data.worker.bookingWindowDays);
+    setMinimumNoticeMinutes(data.worker.minimumNoticeMinutes);
+
+    const windowsByDay = new Map<number, AvailabilityWindow[]>();
+    for (const window of data.windows) {
+      if (!window.active) continue;
+      const current = windowsByDay.get(window.weekday) ?? [];
+      current.push(window);
+      windowsByDay.set(window.weekday, current);
+    }
+
+    const nextDays = defaultWorkerDayForms(data.worker.location).map((day) => {
+      const dayWindows = (windowsByDay.get(day.weekday) ?? []).sort(
+        (left, right) => left.startMinute - right.startMinute,
+      );
+      if (!dayWindows.length) return { ...day, active: false };
+      return {
+        weekday: day.weekday,
+        active: true,
+        start: minuteToTime(dayWindows[0]?.startMinute ?? 9 * 60),
+        end: minuteToTime(dayWindows.at(-1)?.endMinute ?? 16 * 60),
+        location: dayWindows[0]?.location ?? data.worker.location,
+      };
+    });
+    setWorkerDays(nextDays);
+
+    const splitDay = [...windowsByDay.values()].find((dayWindows) => dayWindows.length >= 2);
+    if (splitDay) {
+      const sorted = [...splitDay].sort((left, right) => left.startMinute - right.startMinute);
+      setWorkerBreakStart(minuteToTime(sorted[0]?.endMinute ?? 12 * 60));
+      setWorkerBreakEnd(minuteToTime(sorted[1]?.startMinute ?? 12 * 60 + 30));
+    }
+  }
+
+  async function loadWorkerSettings() {
+    const data = await apiRequest<{
+      worker: Worker;
+      windows: AvailabilityWindow[];
+      timeOff: TimeOff[];
+    }>("/worker/settings");
+    applyWorkerSettings(data);
+  }
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
   useEffect(() => {
     void run(async () => {
       await loadCatalog();
@@ -789,13 +981,24 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }, []);
 
   useEffect(() => {
+    if (user?.role === "WORKER") {
+      latestSlotsRequestRef.current += 1;
+      setSlots([]);
+      return;
+    }
     if (!selectedWorkerId || !selectedServiceId || !selectedWorkerSupportsService) {
       latestSlotsRequestRef.current += 1;
       setSlots([]);
       return;
     }
     void run(fetchSlots);
-  }, [dateStripStart, selectedServiceId, selectedWorkerId, selectedWorkerSupportsService]);
+  }, [
+    dateStripStart,
+    selectedServiceId,
+    selectedWorkerId,
+    selectedWorkerSupportsService,
+    user?.role,
+  ]);
 
   useEffect(() => {
     if (!selectedWorkerId || !selectedWorker) return;
@@ -886,14 +1089,14 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     update();
   }
 
-  function switchMainTab(tab: MainTab, appointmentId?: string) {
+  function switchMainTab(tab: PatientTab, appointmentId?: string) {
     updateWithViewTransition(() => {
       setActiveTab(tab);
       if (appointmentId) setFocusAppointmentId(appointmentId);
     });
   }
 
-  function focusMainTab(tab: MainTab) {
+  function focusMainTab(tab: PatientTab) {
     switchMainTab(tab);
     window.requestAnimationFrame(() => {
       const tabRef = tab === "book" ? bookingTabRef : appointmentsTabRef;
@@ -903,7 +1106,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   function handleMainTabKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     const nextTab = activeTab === "book" ? "appointments" : "book";
-    let targetTab: MainTab | null = null;
+    let targetTab: PatientTab | null = null;
 
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
       targetTab = nextTab;
@@ -1146,21 +1349,100 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   async function saveAvailability(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const breakStartMinute = timeToMinute(workerBreakStart);
+    const breakEndMinute = timeToMinute(workerBreakEnd);
+    const hasBreak = Boolean(
+      workerBreakStart && workerBreakEnd && breakEndMinute > breakStartMinute,
+    );
+    const windows = workerDays.flatMap((day) => {
+      if (!day.active) return [];
+      const startMinute = timeToMinute(day.start);
+      const endMinute = timeToMinute(day.end);
+      if (endMinute <= startMinute) return [];
+      const location = day.location.trim() || workerLocation;
+      if (hasBreak && breakStartMinute > startMinute && breakEndMinute < endMinute) {
+        return [
+          {
+            weekday: day.weekday,
+            startMinute,
+            endMinute: breakStartMinute,
+            location,
+            active: true,
+          },
+          {
+            weekday: day.weekday,
+            startMinute: breakEndMinute,
+            endMinute,
+            location,
+            active: true,
+          },
+        ];
+      }
+      return [{ weekday: day.weekday, startMinute, endMinute, location, active: true }];
+    });
+
     await run(async () => {
       await apiRequest("/worker/settings", {
         method: "PUT",
         body: JSON.stringify({
           location: workerLocation,
-          windows: weekdays.map((weekday) => ({
-            weekday,
-            startMinute: timeToMinute(availabilityStart),
-            endMinute: timeToMinute(availabilityEnd),
-            active: true,
-          })),
+          appointmentDurationMinutes,
+          bufferMinutes,
+          bookingWindowDays: workerBookingWindowDays,
+          minimumNoticeMinutes,
+          windows,
         }),
       });
       await refreshSession();
     }, t("notices.availabilitySaved"));
+  }
+
+  async function updateAppointmentStatus(
+    id: string,
+    status: Extract<AppointmentStatus, "COMPLETED" | "NO_SHOW">,
+  ) {
+    await run(async () => {
+      await apiRequest(`/appointments/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      await refreshSession();
+    }, t("notices.appointmentUpdated"));
+  }
+
+  function openBlockDialog(date = workerToday) {
+    setBlockDate(date);
+    setBlockStart("12:00");
+    setBlockEnd("12:30");
+    setBlockReason(t("worker.block.defaultReason"));
+    setBlockDialogOpen(true);
+    setError(null);
+    setNotice(null);
+  }
+
+  async function createBlockTime(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const startsAt = inputDateMinuteInTimeZone(blockDate, timeToMinute(blockStart), workerTimeZone);
+    const endsAt = inputDateMinuteInTimeZone(blockDate, timeToMinute(blockEnd), workerTimeZone);
+    await run(async () => {
+      await apiRequest("/worker/time-off", {
+        method: "POST",
+        body: JSON.stringify({
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          reason: blockReason,
+        }),
+      });
+      setBlockDialogOpen(false);
+      await loadWorkerSettings();
+    }, t("notices.timeBlocked"));
+  }
+
+  async function deleteTimeOff(id: string) {
+    await run(async () => {
+      await apiRequest(`/worker/time-off/${id}`, { method: "DELETE" });
+      await loadWorkerSettings();
+    }, t("notices.timeBlockRemoved"));
   }
 
   async function createAdminUser(event: React.FormEvent<HTMLFormElement>) {
@@ -1264,6 +1546,592 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     );
   }
 
+  function workerAppointmentLocation(appointment: Appointment) {
+    return appointment.location ?? appointment.worker.location;
+  }
+
+  function isCurrentAppointment(appointment: Appointment) {
+    const now = Date.now();
+    return (
+      appointment.status === "CONFIRMED" &&
+      new Date(appointment.startsAt).getTime() <= now &&
+      new Date(appointment.endsAt).getTime() >= now
+    );
+  }
+
+  function renderWorkerAppointmentEvent(appointment: Appointment, compact = false) {
+    const current = isCurrentAppointment(appointment);
+    const showActions = appointment.status === "CONFIRMED";
+
+    return (
+      <article
+        className={[
+          "min-w-0 overflow-hidden rounded-md border bg-white p-3",
+          compact ? "text-sm" : "",
+          current ? "border-l-4 border-l-teal-600 bg-teal-50" : "border-[var(--line)]",
+          appointment.status === "CANCELED" ? "opacity-65" : "",
+        ].join(" ")}
+        data-testid={`worker-appointment-${appointment.id}`}
+        key={appointment.id}
+      >
+        <div
+          className={
+            compact
+              ? "grid min-w-0 gap-2"
+              : "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+          }
+        >
+          <div className="min-w-0">
+            {compact ? (
+              <p className="min-w-0 font-bold leading-snug">
+                <span className="block whitespace-nowrap">
+                  {formatTime(appointment.startsAt, locale, workerTimeZone)}
+                </span>
+                <span className="block break-words">{appointment.patient.name}</span>
+              </p>
+            ) : (
+              <p className="break-words font-bold">
+                {formatTime(appointment.startsAt, locale, workerTimeZone)} ·{" "}
+                {appointment.patient.name}
+              </p>
+            )}
+            <p className="muted mt-1 break-words text-sm leading-snug">
+              {serviceName(appointment.service, locale)} · {workerAppointmentLocation(appointment)}
+            </p>
+            <p className="muted mt-1 break-words text-sm leading-snug">
+              {appointment.patient.phone ?? appointment.patient.email}
+              {appointment.patient.phone ? ` · ${appointment.patient.email}` : ""}
+            </p>
+          </div>
+          <span
+            className={[
+              "inline-flex max-w-full rounded-md border font-semibold leading-tight",
+              compact
+                ? "w-fit whitespace-normal px-2 py-1 text-xs"
+                : "w-fit shrink-0 px-3 py-1 text-sm",
+              appointmentStatusClass(appointment.status),
+            ].join(" ")}
+          >
+            {current ? t("worker.now") : appointmentStatusLabel(appointment.status)}
+          </span>
+        </div>
+
+        {showActions && !compact ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="btn-primary flex items-center gap-2"
+              disabled={saving}
+              onClick={() => updateAppointmentStatus(appointment.id, "COMPLETED")}
+              type="button"
+            >
+              <Check aria-hidden="true" size={16} />
+              {t("worker.actions.markDone")}
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={saving}
+              onClick={() => updateAppointmentStatus(appointment.id, "NO_SHOW")}
+              type="button"
+            >
+              {t("worker.actions.noShow")}
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={saving}
+              onClick={() => cancelAppointment(appointment.id)}
+              type="button"
+            >
+              {t("appointments.cancel")}
+            </button>
+          </div>
+        ) : null}
+      </article>
+    );
+  }
+
+  function timeOffForDate(date: string) {
+    return workerTimeOff.filter((entry) => {
+      const startKey = formatDateKey(entry.startsAt, workerTimeZone);
+      const endKey = formatDateKey(entry.endsAt, workerTimeZone);
+      return startKey <= date && endKey >= date;
+    });
+  }
+
+  function workerDaySlotCount(day: WorkerDayForm) {
+    if (!day.active) return t("worker.off");
+    const startMinute = timeToMinute(day.start);
+    const endMinute = timeToMinute(day.end);
+    const breakStartMinute = timeToMinute(workerBreakStart);
+    const breakEndMinute = timeToMinute(workerBreakEnd);
+    const step = ceilToSlotStep(appointmentDurationMinutes + bufferMinutes);
+    const countWindow = (start: number, end: number) =>
+      end - start >= appointmentDurationMinutes
+        ? Math.floor((end - start - appointmentDurationMinutes) / step) + 1
+        : 0;
+
+    if (
+      breakEndMinute > breakStartMinute &&
+      breakStartMinute > startMinute &&
+      breakEndMinute < endMinute
+    ) {
+      return t("worker.slotCount", {
+        count: countWindow(startMinute, breakStartMinute) + countWindow(breakEndMinute, endMinute),
+      });
+    }
+
+    return t("worker.slotCount", { count: countWindow(startMinute, endMinute) });
+  }
+
+  function updateWorkerDay(weekday: number, patch: Partial<WorkerDayForm>) {
+    setWorkerDays((current) =>
+      current.map((day) => (day.weekday === weekday ? { ...day, ...patch } : day)),
+    );
+  }
+
+  function updateWorkerLocation(nextLocation: string) {
+    setWorkerDays((current) =>
+      current.map((day) =>
+        day.location === workerLocation ? { ...day, location: nextLocation } : day,
+      ),
+    );
+    setWorkerLocation(nextLocation);
+  }
+
+  function renderWorkerWorkspace() {
+    return (
+      <section className="surface min-w-0 overflow-hidden">
+        <div
+          aria-label={t("worker.tabsLabel")}
+          className="grid border-b border-[var(--line)] sm:grid-cols-3"
+          role="tablist"
+        >
+          {(
+            [
+              ["agenda", CalendarClock, t("worker.tabs.agenda"), todayAgendaAppointments.length],
+              ["week", CalendarDays, t("worker.tabs.week"), null],
+              ["schedule", Settings, t("worker.tabs.schedule"), null],
+            ] as const
+          ).map(([tab, Icon, label, badge]) => (
+            <button
+              aria-controls={`worker-${tab}-panel`}
+              aria-selected={workerTab === tab}
+              className={[
+                "flex min-h-14 items-center justify-center gap-2 border-b border-[var(--line)] px-4 py-3 text-center font-bold transition sm:border-b-0 sm:border-r last:sm:border-r-0",
+                workerTab === tab
+                  ? "bg-teal-50 text-teal-950"
+                  : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+              ].join(" ")}
+              id={`worker-${tab}-tab`}
+              key={tab}
+              onClick={() => setWorkerTab(tab)}
+              role="tab"
+              tabIndex={workerTab === tab ? 0 : -1}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={18} />
+              {label}
+              {badge !== null ? (
+                <span className="inline-flex min-w-7 justify-center rounded-full bg-teal-100 px-2 py-0.5 text-sm font-bold text-teal-900">
+                  {badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        {workerTab === "agenda" ? (
+          <div
+            aria-labelledby="worker-agenda-tab"
+            className="grid gap-5 p-5"
+            id="worker-agenda-panel"
+            role="tabpanel"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold">{t("worker.agenda.title")}</h2>
+                <p className="muted text-sm">
+                  {fullDateLabel(workerToday, locale)} · {workerLocation}
+                </p>
+              </div>
+              <button
+                className="btn-secondary flex items-center justify-center gap-2"
+                onClick={() => openBlockDialog(workerToday)}
+                type="button"
+              >
+                <Plus aria-hidden="true" size={18} />
+                {t("worker.block.add")}
+              </button>
+            </div>
+
+            <div className="grid gap-3">
+              {todayAgendaAppointments.length ? (
+                todayAgendaAppointments.map((appointment) =>
+                  renderWorkerAppointmentEvent(appointment),
+                )
+              ) : (
+                <p className="muted text-sm">{t("worker.agenda.empty")}</p>
+              )}
+              {timeOffForDate(workerToday).map((entry) => (
+                <div
+                  className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950"
+                  key={entry.id}
+                >
+                  <p className="font-bold">
+                    {formatTime(entry.startsAt, locale, workerTimeZone)} -{" "}
+                    {formatTime(entry.endsAt, locale, workerTimeZone)}
+                  </p>
+                  <p className="text-sm">{entry.reason ?? t("worker.block.blocked")}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {workerTab === "week" ? (
+          <div
+            aria-labelledby="worker-week-tab"
+            className="grid gap-5 p-5"
+            id="worker-week-panel"
+            role="tabpanel"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold">{t("worker.week.title")}</h2>
+                <p className="muted text-sm">
+                  {fullDateLabel(workerWeekStart, locale)} - {fullDateLabel(workerWeekEnd, locale)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  aria-label={t("worker.week.previous")}
+                  className="btn-secondary"
+                  onClick={() => setWorkerWeekStart(addDays(workerWeekStart, -7))}
+                  type="button"
+                >
+                  <ChevronLeft aria-hidden="true" size={18} />
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setWorkerWeekStart(weekStartMonday(workerToday))}
+                  type="button"
+                >
+                  {t("worker.week.today")}
+                </button>
+                <button
+                  aria-label={t("worker.week.next")}
+                  className="btn-secondary"
+                  onClick={() => setWorkerWeekStart(addDays(workerWeekStart, 7))}
+                  type="button"
+                >
+                  <ChevronRight aria-hidden="true" size={18} />
+                </button>
+                <button
+                  className="btn-primary flex items-center gap-2"
+                  onClick={() => openBlockDialog(workerToday)}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" size={18} />
+                  {t("worker.block.add")}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
+              {workerWeekDays.map((date) => {
+                const dayAppointments = weekAppointments
+                  .filter(
+                    (appointment) => formatDateKey(appointment.startsAt, workerTimeZone) === date,
+                  )
+                  .sort(
+                    (left, right) =>
+                      new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+                  );
+                const dayBlocks = timeOffForDate(date);
+
+                return (
+                  <section
+                    className="min-w-0 overflow-hidden rounded-md border border-[var(--line)] p-3"
+                    key={date}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h3 className="font-bold">{weekdayLabel(date, locale)}</h3>
+                        <p className="muted text-sm">{dayNumber(date)}</p>
+                      </div>
+                      <button
+                        aria-label={t("worker.block.addForDate", {
+                          date: fullDateLabel(date, locale),
+                        })}
+                        className="inline-flex h-9 max-w-[8.5rem] items-center justify-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-teal-600 hover:bg-teal-50"
+                        onClick={() => openBlockDialog(date)}
+                        title={t("worker.block.addForDate", {
+                          date: fullDateLabel(date, locale),
+                        })}
+                        type="button"
+                      >
+                        <Plus aria-hidden="true" className="shrink-0" size={16} />
+                        <span className="min-w-0 truncate">{t("worker.block.addShort")}</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid min-w-0 gap-2">
+                      {dayAppointments.map((appointment) =>
+                        renderWorkerAppointmentEvent(appointment, true),
+                      )}
+                      {dayBlocks.map((entry) => (
+                        <div
+                          className="min-w-0 overflow-hidden rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"
+                          key={entry.id}
+                        >
+                          <p className="break-words font-bold">
+                            {formatTime(entry.startsAt, locale, workerTimeZone)} -{" "}
+                            {formatTime(entry.endsAt, locale, workerTimeZone)}
+                          </p>
+                          <p className="break-words">{entry.reason ?? t("worker.block.blocked")}</p>
+                        </div>
+                      ))}
+                      {!dayAppointments.length && !dayBlocks.length ? (
+                        <p className="muted text-sm">{t("worker.week.emptyDay")}</p>
+                      ) : null}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {workerTab === "schedule" ? (
+          <div
+            aria-labelledby="worker-schedule-tab"
+            className="grid gap-5 p-5"
+            id="worker-schedule-panel"
+            role="tabpanel"
+          >
+            <div>
+              <h2 className="text-xl font-bold">{t("worker.schedule.title")}</h2>
+              <p className="muted text-sm">{t("worker.schedule.subtitle")}</p>
+            </div>
+
+            <form className="grid min-w-0 gap-6" onSubmit={saveAvailability}>
+              <label className="field min-w-0">
+                <span>{t("fields.location")}</span>
+                <input
+                  value={workerLocation}
+                  onChange={(event) => updateWorkerLocation(event.target.value)}
+                  required
+                />
+              </label>
+
+              <fieldset className="grid min-w-0 gap-3">
+                <legend className="text-sm font-bold uppercase text-[var(--muted)]">
+                  {t("worker.schedule.workingHours")}
+                </legend>
+                <div className="grid min-w-0 gap-3">
+                  {workerDays.map((day) => (
+                    <div
+                      className="grid min-w-0 gap-3 rounded-md border border-[var(--line)] p-3 xl:grid-cols-[4.5rem_6rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_6rem] xl:items-center"
+                      key={day.weekday}
+                    >
+                      <span className={day.active ? "font-bold" : "muted font-bold"}>
+                        {t(`weekdays.${day.weekday}`)}
+                      </span>
+                      <label className="flex min-w-0 items-center gap-2">
+                        <input
+                          checked={day.active}
+                          onChange={(event) =>
+                            updateWorkerDay(day.weekday, { active: event.target.checked })
+                          }
+                          type="checkbox"
+                        />
+                        {day.active ? t("worker.on") : t("worker.off")}
+                      </label>
+                      <label className="field min-w-0">
+                        <span>{t("worker.start")}</span>
+                        <input
+                          disabled={!day.active}
+                          onChange={(event) =>
+                            updateWorkerDay(day.weekday, { start: event.target.value })
+                          }
+                          step={900}
+                          type="time"
+                          value={day.start}
+                        />
+                      </label>
+                      <label className="field min-w-0">
+                        <span>{t("worker.end")}</span>
+                        <input
+                          disabled={!day.active}
+                          onChange={(event) =>
+                            updateWorkerDay(day.weekday, { end: event.target.value })
+                          }
+                          step={900}
+                          type="time"
+                          value={day.end}
+                        />
+                      </label>
+                      <label className="field min-w-0">
+                        <span>{t("fields.location")}</span>
+                        <input
+                          disabled={!day.active}
+                          onChange={(event) =>
+                            updateWorkerDay(day.weekday, { location: event.target.value })
+                          }
+                          value={day.location}
+                        />
+                      </label>
+                      <span className="muted text-sm">{workerDaySlotCount(day)}</span>
+                    </div>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="grid min-w-0 gap-3">
+                <legend className="text-sm font-bold uppercase text-[var(--muted)]">
+                  {t("worker.schedule.breaks")}
+                </legend>
+                <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <label className="field min-w-0">
+                    <span>{t("worker.block.from")}</span>
+                    <input
+                      onChange={(event) => setWorkerBreakStart(event.target.value)}
+                      step={900}
+                      type="time"
+                      value={workerBreakStart}
+                    />
+                  </label>
+                  <label className="field min-w-0">
+                    <span>{t("worker.block.to")}</span>
+                    <input
+                      onChange={(event) => setWorkerBreakEnd(event.target.value)}
+                      step={900}
+                      type="time"
+                      value={workerBreakEnd}
+                    />
+                  </label>
+                  <button
+                    aria-label={t("worker.block.clear")}
+                    className="btn-secondary flex items-center justify-center"
+                    onClick={() => {
+                      setWorkerBreakStart("");
+                      setWorkerBreakEnd("");
+                    }}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={18} />
+                  </button>
+                </div>
+              </fieldset>
+
+              <fieldset className="grid min-w-0 gap-3">
+                <legend className="text-sm font-bold uppercase text-[var(--muted)]">
+                  {t("worker.schedule.slotSettings")}
+                </legend>
+                <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                  <label className="field min-w-0">
+                    <span>{t("worker.schedule.duration")}</span>
+                    <select
+                      onChange={(event) =>
+                        setAppointmentDurationMinutes(Number(event.target.value))
+                      }
+                      value={appointmentDurationMinutes}
+                    >
+                      {[15, 30, 45, 60].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {t("worker.minutes", { count: minutes })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field min-w-0">
+                    <span>{t("worker.schedule.buffer")}</span>
+                    <select
+                      onChange={(event) => setBufferMinutes(Number(event.target.value))}
+                      value={bufferMinutes}
+                    >
+                      {[0, 5, 10, 15, 30].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {t("worker.minutes", { count: minutes })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field min-w-0">
+                    <span>{t("worker.schedule.bookingWindow")}</span>
+                    <input
+                      max={90}
+                      min={1}
+                      onChange={(event) => setWorkerBookingWindowDays(Number(event.target.value))}
+                      type="number"
+                      value={workerBookingWindowDays}
+                    />
+                  </label>
+                  <label className="field min-w-0">
+                    <span>{t("worker.schedule.minimumNotice")}</span>
+                    <select
+                      onChange={(event) => setMinimumNoticeMinutes(Number(event.target.value))}
+                      value={minimumNoticeMinutes}
+                    >
+                      {[0, 60, 120, 240, 1440].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes >= 1440
+                            ? t("worker.days", { count: minutes / 1440 })
+                            : t("worker.hours", { count: minutes / 60 })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </fieldset>
+
+              <section className="grid min-w-0 gap-3">
+                <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
+                  {t("worker.timeOff.title")}
+                </h3>
+                {upcomingTimeOff.length ? (
+                  <div className="grid min-w-0 gap-2">
+                    {upcomingTimeOff.map((entry) => (
+                      <div
+                        className="flex min-w-0 flex-col gap-3 rounded-md border border-[var(--line)] p-3 sm:flex-row sm:items-center sm:justify-between"
+                        key={entry.id}
+                      >
+                        <div className="min-w-0">
+                          <p className="break-words font-bold">
+                            {entry.reason ?? t("worker.block.blocked")}
+                          </p>
+                          <p className="muted break-words text-sm">
+                            {formatDateTime(entry.startsAt, locale, workerTimeZone)} -{" "}
+                            {formatDateTime(entry.endsAt, locale, workerTimeZone)}
+                          </p>
+                        </div>
+                        <button
+                          aria-label={t("worker.timeOff.remove")}
+                          className="btn-secondary flex shrink-0 items-center justify-center gap-2"
+                          disabled={saving}
+                          onClick={() => deleteTimeOff(entry.id)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                          {t("worker.timeOff.remove")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted text-sm">{t("worker.timeOff.empty")}</p>
+                )}
+              </section>
+
+              <button className="btn-primary" disabled={saving} type="submit">
+                {t("worker.saveAvailability")}
+              </button>
+            </form>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   function errorMessage(code: string) {
     try {
       return t(`errors.${code}`);
@@ -1353,455 +2221,415 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
       <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <div className="grid gap-4" aria-live="polite">
-          {error ? (
-            <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
-              {errorMessage(error)}
-            </p>
-          ) : null}
-          {notice ? (
-            <p className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
-              {notice}
-            </p>
-          ) : null}
+          {hydrated ? (
+            <>
+              {error ? (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+                  {errorMessage(error)}
+                </p>
+              ) : null}
+              {notice ? (
+                <p className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
+                  {notice}
+                </p>
+              ) : null}
 
-          {upcomingAppointment ? (
-            <button
-              className="flex w-full flex-col gap-3 rounded-md border border-teal-300 bg-teal-50 p-4 text-left text-teal-950 transition hover:border-teal-500 hover:bg-teal-100 sm:flex-row sm:items-center sm:justify-between"
-              onClick={() => openAppointmentFromBanner(upcomingAppointment.id)}
-              type="button"
-            >
-              <span className="flex items-start gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-700 text-white">
-                  <CheckCircle2 aria-hidden="true" size={22} />
-                </span>
-                <div>
-                  <span className="font-bold">{t("appointments.next")}</span>
-                  <p className="text-sm">
-                    {appointmentFormatter(upcomingAppointment)} ·{" "}
-                    {upcomingAppointment.worker.location}
-                  </p>
-                </div>
-              </span>
-              <ChevronRight aria-hidden="true" className="shrink-0 text-teal-700" size={22} />
-            </button>
-          ) : null}
-
-          <section className="surface min-w-0 overflow-hidden">
-            <div
-              aria-label={t("appointments.tabsLabel")}
-              className="grid border-b border-[var(--line)] sm:grid-cols-2"
-              onKeyDown={handleMainTabKeyDown}
-              role="tablist"
-            >
-              <button
-                aria-controls="booking-panel"
-                aria-selected={activeTab === "book"}
-                className={[
-                  "flex min-h-14 items-center justify-center gap-2 border-b border-[var(--line)] px-4 py-3 text-center font-bold transition sm:border-b-0 sm:border-r",
-                  activeTab === "book"
-                    ? "bg-teal-50 text-teal-950"
-                    : "bg-white text-[var(--foreground)] hover:bg-slate-50",
-                ].join(" ")}
-                id="booking-tab"
-                onClick={() => switchMainTab("book")}
-                ref={bookingTabRef}
-                role="tab"
-                tabIndex={activeTab === "book" ? 0 : -1}
-                type="button"
-              >
-                {t("booking.title")}
-              </button>
-              <button
-                aria-controls="appointments-panel"
-                aria-selected={activeTab === "appointments"}
-                className={[
-                  "flex min-h-14 items-center justify-center gap-2 px-4 py-3 text-center font-bold transition",
-                  activeTab === "appointments"
-                    ? "bg-teal-50 text-teal-950"
-                    : "bg-white text-[var(--foreground)] hover:bg-slate-50",
-                ].join(" ")}
-                id="appointments-tab"
-                onClick={() => switchMainTab("appointments")}
-                ref={appointmentsTabRef}
-                role="tab"
-                tabIndex={activeTab === "appointments" ? 0 : -1}
-                type="button"
-              >
-                {t("appointments.myAppointments")}
-                <span
-                  aria-label={t("appointments.badgeLabel", { count: appointmentBadgeCount })}
-                  className="inline-flex min-w-7 justify-center rounded-full bg-teal-100 px-2 py-0.5 text-sm font-bold text-teal-900"
+              {upcomingAppointment ? (
+                <button
+                  className="flex w-full flex-col gap-3 rounded-md border border-teal-300 bg-teal-50 p-4 text-left text-teal-950 transition hover:border-teal-500 hover:bg-teal-100 sm:flex-row sm:items-center sm:justify-between"
+                  onClick={() => openAppointmentFromBanner(upcomingAppointment.id)}
+                  type="button"
                 >
-                  {appointmentBadgeCount}
-                </span>
-              </button>
-            </div>
-
-            {activeTab === "book" ? (
-              <div aria-labelledby="booking-tab" className="p-5" id="booking-panel" role="tabpanel">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-xl font-bold">
-                      <CalendarClock aria-hidden="true" size={22} />
-                      {t("booking.title")}
-                    </h2>
-                    <p className="muted text-sm">{t("booking.subtitle")}</p>
-                  </div>
-                  <button className="btn-secondary" onClick={loadSlots} disabled={saving}>
-                    {t("booking.refreshSlots")}
-                  </button>
-                </div>
-
-                {reschedulingAppointment ? (
-                  <div className="mt-5 flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="flex items-start gap-3">
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-700 text-white">
+                      <CheckCircle2 aria-hidden="true" size={22} />
+                    </span>
                     <div>
-                      <p className="font-bold">{t("booking.rescheduling")}</p>
+                      <span className="font-bold">{t("appointments.next")}</span>
                       <p className="text-sm">
-                        {appointmentFormatter(reschedulingAppointment)} ·{" "}
-                        {reschedulingAppointment.worker.location}
+                        {appointmentFormatter(upcomingAppointment)} ·{" "}
+                        {upcomingAppointment.worker.location}
                       </p>
                     </div>
-                    <button className="btn-secondary" onClick={cancelReschedule} type="button">
-                      {t("booking.cancelReschedule")}
+                  </span>
+                  <ChevronRight aria-hidden="true" className="shrink-0 text-teal-700" size={22} />
+                </button>
+              ) : null}
+
+              {user?.role === "WORKER" ? (
+                renderWorkerWorkspace()
+              ) : (
+                <section className="surface min-w-0 overflow-hidden">
+                  <div
+                    aria-label={t("appointments.tabsLabel")}
+                    className="grid border-b border-[var(--line)] sm:grid-cols-2"
+                    onKeyDown={handleMainTabKeyDown}
+                    role="tablist"
+                  >
+                    <button
+                      aria-controls="booking-panel"
+                      aria-selected={activeTab === "book"}
+                      className={[
+                        "flex min-h-14 items-center justify-center gap-2 border-b border-[var(--line)] px-4 py-3 text-center font-bold transition sm:border-b-0 sm:border-r",
+                        activeTab === "book"
+                          ? "bg-teal-50 text-teal-950"
+                          : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+                      ].join(" ")}
+                      id="booking-tab"
+                      onClick={() => switchMainTab("book")}
+                      ref={bookingTabRef}
+                      role="tab"
+                      tabIndex={activeTab === "book" ? 0 : -1}
+                      type="button"
+                    >
+                      {t("booking.title")}
+                    </button>
+                    <button
+                      aria-controls="appointments-panel"
+                      aria-selected={activeTab === "appointments"}
+                      className={[
+                        "flex min-h-14 items-center justify-center gap-2 px-4 py-3 text-center font-bold transition",
+                        activeTab === "appointments"
+                          ? "bg-teal-50 text-teal-950"
+                          : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+                      ].join(" ")}
+                      id="appointments-tab"
+                      onClick={() => switchMainTab("appointments")}
+                      ref={appointmentsTabRef}
+                      role="tab"
+                      tabIndex={activeTab === "appointments" ? 0 : -1}
+                      type="button"
+                    >
+                      {t("appointments.myAppointments")}
+                      <span
+                        aria-label={t("appointments.badgeLabel", { count: appointmentBadgeCount })}
+                        className="inline-flex min-w-7 justify-center rounded-full bg-teal-100 px-2 py-0.5 text-sm font-bold text-teal-900"
+                      >
+                        {appointmentBadgeCount}
+                      </span>
                     </button>
                   </div>
-                ) : null}
 
-                <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
-                  <label className="field min-w-0">
-                    <span>{t("fields.worker")}</span>
-                    <select
-                      disabled={Boolean(reschedulingAppointment)}
-                      value={selectedWorkerId}
-                      onChange={(event) => {
-                        const worker = workers.find((item) => item.id === event.target.value);
-                        setSelectedWorkerId(event.target.value);
-                        setSelectedServiceId(defaultServiceIdForWorker(worker, services));
-                      }}
+                  {activeTab === "book" ? (
+                    <div
+                      aria-labelledby="booking-tab"
+                      className="p-5"
+                      id="booking-panel"
+                      role="tabpanel"
                     >
-                      {workers.map((worker) => (
-                        <option key={worker.id} value={worker.id}>
-                          {worker.name} · {worker.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field min-w-0">
-                    <span>{t("fields.service")}</span>
-                    <select
-                      disabled={!selectableServices.length || Boolean(reschedulingAppointment)}
-                      value={selectedServiceId}
-                      onChange={(event) => setSelectedServiceId(event.target.value)}
-                    >
-                      {selectableServices.map((service) => (
-                        <option key={service.id} value={service.id}>
-                          {serviceName(service, locale)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="mt-5 min-w-0">
-                  <p className="muted text-sm font-semibold">{t("booking.selectDate")}</p>
-                  <div
-                    aria-label={t("booking.selectDate")}
-                    className="mt-3 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2"
-                    tabIndex={0}
-                  >
-                    {dateStripDays.map((date) => {
-                      const counts = slotCountsByDate.get(date) ?? { available: 0, total: 0 };
-                      const selected = selectedDate === date;
-                      const unavailable = counts.total === 0;
-                      const limited = counts.available > 0 && counts.available <= 2;
-                      const full = counts.available >= 3;
-                      const weekend = isWeekend(date);
-                      const disabled = unavailable;
-                      return (
-                        <button
-                          aria-pressed={selected}
-                          className={[
-                            "grid min-h-24 w-[5.25rem] shrink-0 gap-1 rounded-md border p-2 text-center transition sm:w-24 sm:p-3",
-                            selected
-                              ? "border-teal-700 bg-teal-50 text-teal-950"
-                              : "border-[var(--line)] bg-white text-[var(--foreground)]",
-                            disabled || weekend ? "opacity-50" : "",
-                          ].join(" ")}
-                          disabled={disabled}
-                          data-testid={`strip-date-${date}`}
-                          key={date}
-                          aria-label={fullDateLabel(date, locale)}
-                          onClick={() => selectStripDate(date)}
-                          type="button"
-                        >
-                          <span className="text-xs font-bold uppercase">
-                            {weekdayLabel(date, locale)}
-                          </span>
-                          <span className="text-2xl font-bold">{dayNumber(date)}</span>
-                          <span
-                            aria-label={
-                              full
-                                ? t("booking.availabilityFull")
-                                : limited
-                                  ? t("booking.availabilityLimited")
-                                  : t("booking.availabilityUnavailable")
-                            }
-                            className={[
-                              "mx-auto h-2.5 w-2.5 rounded-full",
-                              full ? "bg-teal-600" : limited ? "bg-amber-500" : "bg-slate-400",
-                            ].join(" ")}
-                          />
-                          {limited ? (
-                            <span className="text-xs font-semibold text-amber-800">
-                              {t("booking.left", { count: counts.available })}
-                            </span>
-                          ) : null}
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h2 className="flex items-center gap-2 text-xl font-bold">
+                            <CalendarClock aria-hidden="true" size={22} />
+                            {t("booking.title")}
+                          </h2>
+                          <p className="muted text-sm">{t("booking.subtitle")}</p>
+                        </div>
+                        <button className="btn-secondary" onClick={loadSlots} disabled={saving}>
+                          {t("booking.refreshSlots")}
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
-                  <DatePickerCalendar
-                    bookingMaxDate={bookingMaxDate}
-                    bookingMinDate={bookingMinDate}
-                    calendarMonth={calendarMonth}
-                    locale={locale}
-                    selectCalendarDate={selectCalendarDate}
-                    selectedDate={selectedDate}
-                    setCalendarMonth={setCalendarMonth}
-                    slotCountsByDate={slotCountsByDate}
-                  />
-
-                  <div className="grid min-w-0 gap-5">
-                    {slotsForSelectedDate.length ? (
-                      <>
-                        {morningSlots.length ? (
-                          <SlotGroup
-                            actionLabel={slotActionLabel}
-                            locale={locale}
-                            requestBooking={requestBooking}
-                            saving={saving}
-                            slots={morningSlots}
-                            timeZone={selectedWorker?.timezone}
-                            title={t("booking.morning")}
-                            user={user}
-                            userCanBook={slotUserCanBook}
-                          />
-                        ) : null}
-                        {afternoonSlots.length ? (
-                          <SlotGroup
-                            actionLabel={slotActionLabel}
-                            locale={locale}
-                            requestBooking={requestBooking}
-                            saving={saving}
-                            slots={afternoonSlots}
-                            timeZone={selectedWorker?.timezone}
-                            title={t("booking.afternoon")}
-                            user={user}
-                            userCanBook={slotUserCanBook}
-                          />
-                        ) : null}
-                      </>
-                    ) : (
-                      <p className="muted text-sm">{t("booking.noSlotsForDate")}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div
-                aria-labelledby="appointments-tab"
-                className="grid gap-6 p-5"
-                id="appointments-panel"
-                role="tabpanel"
-              >
-                <div>
-                  <h2 className="text-xl font-bold">{t("appointments.myAppointments")}</h2>
-                  <p className="muted text-sm">{t("appointments.subtitle")}</p>
-                </div>
-
-                {appointments.length ? (
-                  <>
-                    <section>
-                      <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
-                        {t("appointments.upcoming")}
-                      </h3>
-                      <div className="mt-3 grid gap-3">
-                        {upcomingAppointments.length ? (
-                          upcomingAppointments.map((appointment) =>
-                            renderAppointmentCard(appointment),
-                          )
-                        ) : (
-                          <p className="muted text-sm">{t("appointments.noUpcoming")}</p>
-                        )}
                       </div>
-                    </section>
 
-                    {pastAppointments.length ? (
-                      <section>
-                        <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
-                          {t("appointments.past")}
-                        </h3>
-                        <div className="mt-3 grid gap-3">
-                          {pastAppointments.map((appointment) =>
-                            renderAppointmentCard(appointment, true),
+                      {reschedulingAppointment ? (
+                        <div className="mt-5 flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-bold">{t("booking.rescheduling")}</p>
+                            <p className="text-sm">
+                              {appointmentFormatter(reschedulingAppointment)} ·{" "}
+                              {reschedulingAppointment.worker.location}
+                            </p>
+                          </div>
+                          <button
+                            className="btn-secondary"
+                            onClick={cancelReschedule}
+                            type="button"
+                          >
+                            {t("booking.cancelReschedule")}
+                          </button>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
+                        <label className="field min-w-0">
+                          <span>{t("fields.worker")}</span>
+                          <select
+                            disabled={Boolean(reschedulingAppointment)}
+                            value={selectedWorkerId}
+                            onChange={(event) => {
+                              const worker = workers.find((item) => item.id === event.target.value);
+                              setSelectedWorkerId(event.target.value);
+                              setSelectedServiceId(defaultServiceIdForWorker(worker, services));
+                            }}
+                          >
+                            {workers.map((worker) => (
+                              <option key={worker.id} value={worker.id}>
+                                {worker.name} · {worker.title}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field min-w-0">
+                          <span>{t("fields.service")}</span>
+                          <select
+                            disabled={
+                              !selectableServices.length || Boolean(reschedulingAppointment)
+                            }
+                            value={selectedServiceId}
+                            onChange={(event) => setSelectedServiceId(event.target.value)}
+                          >
+                            {selectableServices.map((service) => (
+                              <option key={service.id} value={service.id}>
+                                {serviceName(service, locale)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="mt-5 min-w-0">
+                        <p className="muted text-sm font-semibold">{t("booking.selectDate")}</p>
+                        <div
+                          aria-label={t("booking.selectDate")}
+                          className="mt-3 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2"
+                          tabIndex={0}
+                        >
+                          {dateStripDays.map((date) => {
+                            const counts = slotCountsByDate.get(date) ?? { available: 0, total: 0 };
+                            const selected = selectedDate === date;
+                            const unavailable = counts.total === 0;
+                            const limited = counts.available > 0 && counts.available <= 2;
+                            const full = counts.available >= 3;
+                            const weekend = isWeekend(date);
+                            const disabled = unavailable;
+                            return (
+                              <button
+                                aria-pressed={selected}
+                                className={[
+                                  "grid min-h-24 w-[5.25rem] shrink-0 gap-1 rounded-md border p-2 text-center transition sm:w-24 sm:p-3",
+                                  selected
+                                    ? "border-teal-700 bg-teal-50 text-teal-950"
+                                    : "border-[var(--line)] bg-white text-[var(--foreground)]",
+                                  disabled || weekend ? "opacity-50" : "",
+                                ].join(" ")}
+                                disabled={disabled}
+                                data-testid={`strip-date-${date}`}
+                                key={date}
+                                aria-label={fullDateLabel(date, locale)}
+                                onClick={() => selectStripDate(date)}
+                                type="button"
+                              >
+                                <span className="text-xs font-bold uppercase">
+                                  {weekdayLabel(date, locale)}
+                                </span>
+                                <span className="text-2xl font-bold">{dayNumber(date)}</span>
+                                <span
+                                  aria-label={
+                                    full
+                                      ? t("booking.availabilityFull")
+                                      : limited
+                                        ? t("booking.availabilityLimited")
+                                        : t("booking.availabilityUnavailable")
+                                  }
+                                  className={[
+                                    "mx-auto h-2.5 w-2.5 rounded-full",
+                                    full
+                                      ? "bg-teal-600"
+                                      : limited
+                                        ? "bg-amber-500"
+                                        : "bg-slate-400",
+                                  ].join(" ")}
+                                />
+                                {limited ? (
+                                  <span className="text-xs font-semibold text-amber-800">
+                                    {t("booking.left", { count: counts.available })}
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
+                        <DatePickerCalendar
+                          bookingMaxDate={bookingMaxDate}
+                          bookingMinDate={bookingMinDate}
+                          calendarMonth={calendarMonth}
+                          locale={locale}
+                          selectCalendarDate={selectCalendarDate}
+                          selectedDate={selectedDate}
+                          setCalendarMonth={setCalendarMonth}
+                          slotCountsByDate={slotCountsByDate}
+                        />
+
+                        <div className="grid min-w-0 gap-5">
+                          {slotsForSelectedDate.length ? (
+                            <>
+                              {morningSlots.length ? (
+                                <SlotGroup
+                                  actionLabel={slotActionLabel}
+                                  locale={locale}
+                                  requestBooking={requestBooking}
+                                  saving={saving}
+                                  slots={morningSlots}
+                                  timeZone={selectedWorker?.timezone}
+                                  title={t("booking.morning")}
+                                  user={user}
+                                  userCanBook={slotUserCanBook}
+                                />
+                              ) : null}
+                              {afternoonSlots.length ? (
+                                <SlotGroup
+                                  actionLabel={slotActionLabel}
+                                  locale={locale}
+                                  requestBooking={requestBooking}
+                                  saving={saving}
+                                  slots={afternoonSlots}
+                                  timeZone={selectedWorker?.timezone}
+                                  title={t("booking.afternoon")}
+                                  user={user}
+                                  userCanBook={slotUserCanBook}
+                                />
+                              ) : null}
+                            </>
+                          ) : (
+                            <p className="muted text-sm">{t("booking.noSlotsForDate")}</p>
                           )}
                         </div>
-                      </section>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="muted text-sm">{t("appointments.empty")}</p>
-                )}
-              </div>
-            )}
-          </section>
-
-          {user?.role === "WORKER" ? (
-            <section className="surface p-5">
-              <h2 className="flex items-center gap-2 text-xl font-bold">
-                <Stethoscope aria-hidden="true" size={22} />
-                {t("worker.title")}
-              </h2>
-              <form className="mt-4 grid gap-4" onSubmit={saveAvailability}>
-                <label className="field">
-                  <span>{t("fields.location")}</span>
-                  <input
-                    value={workerLocation}
-                    onChange={(event) => setWorkerLocation(event.target.value)}
-                    required
-                  />
-                </label>
-                <fieldset className="grid gap-3">
-                  <legend className="font-semibold">{t("worker.weekdays")}</legend>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    {[1, 2, 3, 4, 5].map((weekday) => (
-                      <label className="flex items-center gap-2" key={weekday}>
-                        <input
-                          type="checkbox"
-                          checked={weekdays.includes(weekday)}
-                          onChange={(event) => {
-                            setWeekdays((current) =>
-                              event.target.checked
-                                ? [...current, weekday].sort()
-                                : current.filter((item) => item !== weekday),
-                            );
-                          }}
-                        />
-                        {t(`weekdays.${weekday}`)}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="field">
-                    <span>{t("worker.start")}</span>
-                    <input
-                      type="time"
-                      step={900}
-                      value={availabilityStart}
-                      onChange={(event) => setAvailabilityStart(event.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("worker.end")}</span>
-                    <input
-                      type="time"
-                      step={900}
-                      value={availabilityEnd}
-                      onChange={(event) => setAvailabilityEnd(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <button className="btn-primary" type="submit" disabled={saving}>
-                  {t("worker.saveAvailability")}
-                </button>
-              </form>
-            </section>
-          ) : null}
-
-          {user?.role === "ADMIN" ? (
-            <section className="surface p-5">
-              <h2 className="flex items-center gap-2 text-xl font-bold">
-                <Shield aria-hidden="true" size={22} />
-                {t("admin.title")}
-              </h2>
-              <div className="mt-4 grid gap-5 lg:grid-cols-2">
-                <form className="grid gap-4" onSubmit={createAdminUser}>
-                  <h3 className="font-bold">{t("admin.createUser")}</h3>
-                  <label className="field">
-                    <span>{t("fields.name")}</span>
-                    <input
-                      value={adminUserName}
-                      onChange={(event) => setAdminUserName(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("fields.email")}</span>
-                    <input
-                      type="email"
-                      value={adminUserEmail}
-                      onChange={(event) => setAdminUserEmail(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("fields.role")}</span>
-                    <select
-                      value={adminUserRole}
-                      onChange={(event) => setAdminUserRole(event.target.value as Role)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      aria-labelledby="appointments-tab"
+                      className="grid gap-6 p-5"
+                      id="appointments-panel"
+                      role="tabpanel"
                     >
-                      <option value="PATIENT">{t("roles.patient")}</option>
-                      <option value="WORKER">{t("roles.worker")}</option>
-                      <option value="ADMIN">{t("roles.admin")}</option>
-                    </select>
-                  </label>
-                  {adminUserRole === "WORKER" ? (
-                    <label className="field">
-                      <span>{t("fields.location")}</span>
-                      <input
-                        value={adminWorkerLocation}
-                        onChange={(event) => setAdminWorkerLocation(event.target.value)}
-                        required
-                      />
-                    </label>
-                  ) : null}
-                  <button
-                    className="btn-primary flex items-center justify-center gap-2"
-                    type="submit"
-                  >
-                    <UserPlus aria-hidden="true" size={18} />
-                    {t("admin.saveUser")}
-                  </button>
-                </form>
+                      <div>
+                        <h2 className="text-xl font-bold">{t("appointments.myAppointments")}</h2>
+                        <p className="muted text-sm">{t("appointments.subtitle")}</p>
+                      </div>
 
-                <form className="grid gap-4" onSubmit={createService}>
-                  <h3 className="font-bold">{t("admin.createService")}</h3>
-                  <label className="field">
-                    <span>{t("admin.serviceNameEn")}</span>
-                    <input
-                      value={serviceNameEn}
-                      onChange={(event) => setServiceNameEn(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="field">
-                    <span>{t("admin.serviceNameFi")}</span>
-                    <input
-                      value={serviceNameFi}
-                      onChange={(event) => setServiceNameFi(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <button className="btn-primary" type="submit">
-                    {t("admin.saveService")}
-                  </button>
-                </form>
-              </div>
-            </section>
+                      {appointments.length ? (
+                        <>
+                          <section>
+                            <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
+                              {t("appointments.upcoming")}
+                            </h3>
+                            <div className="mt-3 grid gap-3">
+                              {upcomingAppointments.length ? (
+                                upcomingAppointments.map((appointment) =>
+                                  renderAppointmentCard(appointment),
+                                )
+                              ) : (
+                                <p className="muted text-sm">{t("appointments.noUpcoming")}</p>
+                              )}
+                            </div>
+                          </section>
+
+                          {pastAppointments.length ? (
+                            <section>
+                              <h3 className="text-sm font-bold uppercase text-[var(--muted)]">
+                                {t("appointments.past")}
+                              </h3>
+                              <div className="mt-3 grid gap-3">
+                                {pastAppointments.map((appointment) =>
+                                  renderAppointmentCard(appointment, true),
+                                )}
+                              </div>
+                            </section>
+                          ) : null}
+                        </>
+                      ) : (
+                        <p className="muted text-sm">{t("appointments.empty")}</p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {user?.role === "ADMIN" ? (
+                <section className="surface p-5">
+                  <h2 className="flex items-center gap-2 text-xl font-bold">
+                    <Shield aria-hidden="true" size={22} />
+                    {t("admin.title")}
+                  </h2>
+                  <div className="mt-4 grid gap-5 lg:grid-cols-2">
+                    <form className="grid gap-4" onSubmit={createAdminUser}>
+                      <h3 className="font-bold">{t("admin.createUser")}</h3>
+                      <label className="field">
+                        <span>{t("fields.name")}</span>
+                        <input
+                          value={adminUserName}
+                          onChange={(event) => setAdminUserName(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t("fields.email")}</span>
+                        <input
+                          type="email"
+                          value={adminUserEmail}
+                          onChange={(event) => setAdminUserEmail(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t("fields.role")}</span>
+                        <select
+                          value={adminUserRole}
+                          onChange={(event) => setAdminUserRole(event.target.value as Role)}
+                        >
+                          <option value="PATIENT">{t("roles.patient")}</option>
+                          <option value="WORKER">{t("roles.worker")}</option>
+                          <option value="ADMIN">{t("roles.admin")}</option>
+                        </select>
+                      </label>
+                      {adminUserRole === "WORKER" ? (
+                        <label className="field">
+                          <span>{t("fields.location")}</span>
+                          <input
+                            value={adminWorkerLocation}
+                            onChange={(event) => setAdminWorkerLocation(event.target.value)}
+                            required
+                          />
+                        </label>
+                      ) : null}
+                      <button
+                        className="btn-primary flex items-center justify-center gap-2"
+                        type="submit"
+                      >
+                        <UserPlus aria-hidden="true" size={18} />
+                        {t("admin.saveUser")}
+                      </button>
+                    </form>
+
+                    <form className="grid gap-4" onSubmit={createService}>
+                      <h3 className="font-bold">{t("admin.createService")}</h3>
+                      <label className="field">
+                        <span>{t("admin.serviceNameEn")}</span>
+                        <input
+                          value={serviceNameEn}
+                          onChange={(event) => setServiceNameEn(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t("admin.serviceNameFi")}</span>
+                        <input
+                          value={serviceNameFi}
+                          onChange={(event) => setServiceNameFi(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <button className="btn-primary" type="submit">
+                        {t("admin.saveService")}
+                      </button>
+                    </form>
+                  </div>
+                </section>
+              ) : null}
+            </>
           ) : null}
         </div>
       </div>
@@ -1978,6 +2806,79 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
               ) : null}
               <button className="btn-primary" type="submit" disabled={saving}>
                 {authMode === "register" ? t("auth.createAccount") : t("auth.signIn")}
+              </button>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {blockDialogOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6">
+          <section
+            aria-labelledby="block-dialog-title"
+            aria-modal="true"
+            className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold" id="block-dialog-title">
+                  {t("worker.block.title")}
+                </h2>
+                <p className="muted mt-1 text-sm">{t("worker.block.subtitle")}</p>
+              </div>
+              <button
+                aria-label={t("auth.close")}
+                className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+                disabled={saving}
+                onClick={() => setBlockDialogOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            <form className="mt-5 grid gap-4" onSubmit={createBlockTime}>
+              <label className="field">
+                <span>{t("fields.startDate")}</span>
+                <input
+                  onChange={(event) => setBlockDate(event.target.value)}
+                  required
+                  type="date"
+                  value={blockDate}
+                />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="field">
+                  <span>{t("worker.block.from")}</span>
+                  <input
+                    onChange={(event) => setBlockStart(event.target.value)}
+                    required
+                    step={900}
+                    type="time"
+                    value={blockStart}
+                  />
+                </label>
+                <label className="field">
+                  <span>{t("worker.block.to")}</span>
+                  <input
+                    onChange={(event) => setBlockEnd(event.target.value)}
+                    required
+                    step={900}
+                    type="time"
+                    value={blockEnd}
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span>{t("worker.block.reason")}</span>
+                <input
+                  onChange={(event) => setBlockReason(event.target.value)}
+                  value={blockReason}
+                />
+              </label>
+              <button className="btn-primary" disabled={saving} type="submit">
+                {t("worker.block.save")}
               </button>
             </form>
           </section>

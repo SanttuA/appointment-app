@@ -116,6 +116,9 @@ export function serializeUser(user: User | SessionUser) {
             location: user.workerProfile.location,
             timezone: user.workerProfile.timezone,
             appointmentDurationMinutes: user.workerProfile.appointmentDurationMinutes,
+            bufferMinutes: user.workerProfile.bufferMinutes,
+            bookingWindowDays: user.workerProfile.bookingWindowDays,
+            minimumNoticeMinutes: user.workerProfile.minimumNoticeMinutes,
             active: user.workerProfile.active,
           }
         : null,

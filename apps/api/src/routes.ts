@@ -97,6 +97,9 @@ function serializeWorker(
     location: worker.location,
     timezone: worker.timezone,
     appointmentDurationMinutes: worker.appointmentDurationMinutes,
+    bufferMinutes: worker.bufferMinutes,
+    bookingWindowDays: worker.bookingWindowDays,
+    minimumNoticeMinutes: worker.minimumNoticeMinutes,
     active: worker.active && worker.user.active,
     services: worker.services.map((entry) => serializeService(entry.service)),
   };
@@ -125,6 +128,7 @@ function serializeAppointment(
     service: serializeService(appointment.service),
     startsAt: appointment.startsAt,
     endsAt: appointment.endsAt,
+    location: appointment.location ?? appointment.workerProfile.location,
     status: appointment.status,
     cancellationReason: appointment.cancellationReason,
     canceledAt: appointment.canceledAt,
@@ -147,10 +151,18 @@ function definedEntries<T extends Record<string, unknown>>(input: T) {
   ) as Record<string, unknown>;
 }
 
-function assertBookingWindow(startsAt: Date) {
+function assertBookingWindow(
+  startsAt: Date,
+  settings: { bookingWindowDays?: number; minimumNoticeMinutes?: number } = {},
+) {
   const now = new Date();
-  const horizon = new Date(now.getTime() + bookingHorizonDays * 24 * 60 * 60 * 1000);
-  if (startsAt < now || startsAt > horizon) {
+  const cappedHorizonDays = Math.min(
+    settings.bookingWindowDays ?? bookingHorizonDays,
+    bookingHorizonDays,
+  );
+  const earliest = new Date(now.getTime() + (settings.minimumNoticeMinutes ?? 0) * 60_000);
+  const horizon = new Date(now.getTime() + cappedHorizonDays * 24 * 60 * 60 * 1000);
+  if (startsAt < earliest || startsAt > horizon) {
     throw new ApiError(400, "BOOKING_WINDOW_INVALID", "Appointment is outside the booking window");
   }
   if (!assertSlotIncrement(startsAt)) {
@@ -185,6 +197,10 @@ async function assertAvailableSlot(input: {
   if (!worker || !worker.active || !worker.user.active) {
     throw new ApiError(404, "WORKER_NOT_FOUND", "Healthcare worker not found");
   }
+  assertBookingWindow(input.startsAt, {
+    bookingWindowDays: worker.bookingWindowDays,
+    minimumNoticeMinutes: worker.minimumNoticeMinutes,
+  });
 
   const service = worker.services.find(
     (entry) => entry.serviceId === input.serviceId && entry.service.active,
@@ -210,25 +226,34 @@ async function assertAvailableSlot(input: {
     to: endsAt,
     timeZone: worker.timezone,
     durationMinutes: worker.appointmentDurationMinutes,
-    availability: worker.availability,
+    bufferMinutes: worker.bufferMinutes,
+    availability: worker.availability.map((window) => ({
+      ...window,
+      location: window.location ?? worker.location,
+    })),
     timeOff: worker.timeOff,
     booked,
   });
 
-  const isAvailable = slots.some(
+  const availableSlot = slots.find(
     (slot) =>
       slot.startsAt.getTime() === input.startsAt.getTime() &&
       slot.endsAt.getTime() === endsAt.getTime(),
   );
 
   if (
-    !isAvailable ||
+    !availableSlot ||
     booked.some((appointment) => overlaps({ startsAt: input.startsAt, endsAt }, appointment))
   ) {
     throw new ApiError(409, "SLOT_UNAVAILABLE", "Selected slot is not available");
   }
 
-  return { worker, service: service.service, endsAt };
+  return {
+    worker,
+    service: service.service,
+    endsAt,
+    location: availableSlot.location ?? worker.location,
+  };
 }
 
 async function canAccessAppointment(request: FastifyRequest, appointmentId: string) {
@@ -502,12 +527,27 @@ function registerCatalogRoutes(app: FastifyInstance) {
       },
     });
 
+    const now = new Date();
+    const earliest = new Date(now.getTime() + worker.minimumNoticeMinutes * 60_000);
+    const horizon = new Date(
+      now.getTime() + Math.min(worker.bookingWindowDays, bookingHorizonDays) * 24 * 60 * 60 * 1000,
+    );
+    const effectiveFrom = from > earliest ? from : earliest;
+    const effectiveTo = to < horizon ? to : horizon;
+    if (effectiveTo <= effectiveFrom) {
+      return { slots: [] };
+    }
+
     const slotInput = {
-      from,
-      to,
+      from: effectiveFrom,
+      to: effectiveTo,
       timeZone: worker.timezone,
       durationMinutes: worker.appointmentDurationMinutes,
-      availability: worker.availability,
+      bufferMinutes: worker.bufferMinutes,
+      availability: worker.availability.map((window) => ({
+        ...window,
+        location: window.location ?? worker.location,
+      })),
       timeOff: worker.timeOff,
       booked,
     };
@@ -519,6 +559,7 @@ function registerCatalogRoutes(app: FastifyInstance) {
       slots: slots.map((slot) => ({
         startsAt: slot.startsAt,
         endsAt: slot.endsAt,
+        location: slot.location ?? worker.location,
         ...("status" in slot ? { status: slot.status } : {}),
       })),
     };
@@ -538,6 +579,10 @@ function registerAppointmentRoutes(app: FastifyInstance) {
 
   const cancelSchema = z.object({
     reason: z.string().trim().max(240).optional(),
+  });
+
+  const statusUpdateSchema = z.object({
+    status: z.enum(["COMPLETED", "NO_SHOW"]),
   });
 
   app.get("/appointments", async (request) => {
@@ -562,7 +607,6 @@ function registerAppointmentRoutes(app: FastifyInstance) {
     const user = await requireRole(request, [Role.PATIENT, Role.ADMIN]);
     const data = createSchema.parse(request.body);
     const startsAt = parseDate(data.startsAt, "START_DATE_INVALID");
-    assertBookingWindow(startsAt);
     const patientId = user.role === Role.PATIENT ? user.id : user.id;
     const availability = await assertAvailableSlot({
       workerProfileId: data.workerProfileId,
@@ -577,6 +621,7 @@ function registerAppointmentRoutes(app: FastifyInstance) {
         serviceId: data.serviceId,
         startsAt,
         endsAt: availability.endsAt,
+        location: availability.location,
         createdById: user.id,
       },
       include: appointmentInclude,
@@ -610,7 +655,6 @@ function registerAppointmentRoutes(app: FastifyInstance) {
     }
 
     const startsAt = parseDate(data.startsAt, "START_DATE_INVALID");
-    assertBookingWindow(startsAt);
     const availability = await assertAvailableSlot({
       workerProfileId: appointment.workerProfileId,
       serviceId: appointment.serviceId,
@@ -623,6 +667,7 @@ function registerAppointmentRoutes(app: FastifyInstance) {
       data: {
         startsAt,
         endsAt: availability.endsAt,
+        location: availability.location,
         updatedById: user.id,
       },
       include: appointmentInclude,
@@ -680,6 +725,39 @@ function registerAppointmentRoutes(app: FastifyInstance) {
 
     return { appointment: serializeAppointment(updated) };
   });
+
+  app.patch("/appointments/:id/status", async (request) => {
+    const params = idParamsSchema.parse(request.params);
+    const data = statusUpdateSchema.parse(request.body);
+    const { appointment, user } = await canAccessAppointment(request, params.id);
+
+    if (user.role !== Role.WORKER && user.role !== Role.ADMIN) {
+      throw new ApiError(403, "FORBIDDEN", "You do not have permission for this action");
+    }
+    if (appointment.status !== AppointmentStatus.CONFIRMED) {
+      throw new ApiError(400, "APPOINTMENT_NOT_ACTIVE", "Only active appointments can be updated");
+    }
+
+    const updated = await prisma.appointment.update({
+      where: { id: appointment.id },
+      data: {
+        status:
+          data.status === "COMPLETED" ? AppointmentStatus.COMPLETED : AppointmentStatus.NO_SHOW,
+        updatedById: user.id,
+      },
+      include: appointmentInclude,
+    });
+
+    await auditLog({
+      actorId: user.id,
+      action: "appointment.updateStatus",
+      entityType: "appointment",
+      entityId: appointment.id,
+      metadata: { status: data.status },
+    });
+
+    return { appointment: serializeAppointment(updated) };
+  });
 }
 
 function registerWorkerRoutes(app: FastifyInstance) {
@@ -689,6 +767,14 @@ function registerWorkerRoutes(app: FastifyInstance) {
     location: z.string().trim().min(1).max(240).optional(),
     timezone: z.string().trim().min(1).max(80).optional(),
     appointmentDurationMinutes: z.number().int().min(15).max(180).multipleOf(15).optional(),
+    bufferMinutes: z.number().int().min(0).max(180).optional(),
+    bookingWindowDays: z.number().int().min(1).max(bookingHorizonDays).optional(),
+    minimumNoticeMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(bookingHorizonDays * 24 * 60)
+      .optional(),
   });
 
   const availabilitySchema = z.object({
@@ -708,6 +794,7 @@ function registerWorkerRoutes(app: FastifyInstance) {
             .min(15)
             .max(24 * 60)
             .multipleOf(15),
+          location: z.string().trim().min(1).max(240).nullable().optional(),
           active: z.boolean().default(true),
         })
         .refine((window) => window.endMinute > window.startMinute, {
@@ -735,6 +822,11 @@ function registerWorkerRoutes(app: FastifyInstance) {
     if (data.appointmentDurationMinutes !== undefined) {
       updateData.appointmentDurationMinutes = data.appointmentDurationMinutes;
     }
+    if (data.bufferMinutes !== undefined) updateData.bufferMinutes = data.bufferMinutes;
+    if (data.bookingWindowDays !== undefined) updateData.bookingWindowDays = data.bookingWindowDays;
+    if (data.minimumNoticeMinutes !== undefined) {
+      updateData.minimumNoticeMinutes = data.minimumNoticeMinutes;
+    }
     return updateData;
   }
 
@@ -755,6 +847,35 @@ function registerWorkerRoutes(app: FastifyInstance) {
       },
     });
     return { worker: serializeWorker(worker) };
+  });
+
+  app.get("/worker/settings", async (request) => {
+    const user = await requireRole(request, [Role.WORKER]);
+    if (!user.workerProfile) {
+      throw new ApiError(404, "WORKER_PROFILE_MISSING", "Worker profile is missing");
+    }
+    const [worker, windows, timeOff] = await Promise.all([
+      prisma.workerProfile.findUniqueOrThrow({
+        where: { id: user.workerProfile.id },
+        include: {
+          user: true,
+          services: {
+            include: {
+              service: true,
+            },
+          },
+        },
+      }),
+      prisma.availabilityWindow.findMany({
+        where: { workerProfileId: user.workerProfile.id },
+        orderBy: [{ weekday: "asc" }, { startMinute: "asc" }],
+      }),
+      prisma.timeOff.findMany({
+        where: { workerProfileId: user.workerProfile.id },
+        orderBy: { startsAt: "asc" },
+      }),
+    ]);
+    return { worker: serializeWorker(worker), windows, timeOff };
   });
 
   app.put("/worker/settings", async (request) => {
@@ -785,6 +906,7 @@ function registerWorkerRoutes(app: FastifyInstance) {
         await tx.availabilityWindow.createMany({
           data: data.windows.map((window) => ({
             ...window,
+            location: window.location ?? null,
             workerProfileId: user.workerProfile!.id,
           })),
         });
@@ -860,6 +982,7 @@ function registerWorkerRoutes(app: FastifyInstance) {
       await tx.availabilityWindow.createMany({
         data: data.windows.map((window) => ({
           ...window,
+          location: window.location ?? null,
           workerProfileId: user.workerProfile!.id,
         })),
       });
@@ -952,6 +1075,14 @@ function registerAdminRoutes(app: FastifyInstance) {
         location: z.string().trim().min(1).max(240).default("Main clinic"),
         timezone: z.string().trim().min(1).max(80).default("Europe/Helsinki"),
         appointmentDurationMinutes: z.number().int().min(15).max(180).multipleOf(15).default(30),
+        bufferMinutes: z.number().int().min(0).max(180).default(0),
+        bookingWindowDays: z.number().int().min(1).max(bookingHorizonDays).default(90),
+        minimumNoticeMinutes: z
+          .number()
+          .int()
+          .min(0)
+          .max(bookingHorizonDays * 24 * 60)
+          .default(0),
         serviceIds: z.array(z.string()).default([]),
       })
       .optional(),
@@ -1008,6 +1139,9 @@ function registerAdminRoutes(app: FastifyInstance) {
           location: data.worker?.location ?? "Main clinic",
           timezone: data.worker?.timezone ?? "Europe/Helsinki",
           appointmentDurationMinutes: data.worker?.appointmentDurationMinutes ?? 30,
+          bufferMinutes: data.worker?.bufferMinutes ?? 0,
+          bookingWindowDays: data.worker?.bookingWindowDays ?? 90,
+          minimumNoticeMinutes: data.worker?.minimumNoticeMinutes ?? 0,
           services: {
             create: (data.worker?.serviceIds ?? []).map((serviceId) => ({
               service: { connect: { id: serviceId } },

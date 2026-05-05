@@ -62,6 +62,9 @@ model WorkerProfile {
   location                   String               @default("Main clinic")
   timezone                   String               @default("Europe/Helsinki")
   appointmentDurationMinutes Int                  @default(30)
+  bufferMinutes              Int                  @default(0)
+  bookingWindowDays          Int                  @default(90)
+  minimumNoticeMinutes       Int                  @default(0)
   active                     Boolean              @default(true)
   services                   WorkerService[]
   availability               AvailabilityWindow[]
@@ -100,6 +103,7 @@ model AvailabilityWindow {
   weekday         Int
   startMinute     Int
   endMinute       Int
+  location        String?
   active          Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -129,6 +133,7 @@ model Appointment {
   service            Service           @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   startsAt           DateTime
   endsAt             DateTime
+  location           String?
   status             AppointmentStatus @default(CONFIRMED)
   cancellationReason String?
   canceledAt         DateTime?

@@ -17,7 +17,7 @@ describe("scheduling", () => {
     ).toBe(true);
   });
 
-  it("generates 15-minute slots from worker availability and excludes booked time", () => {
+  it("generates appointment-duration slots from worker availability and excludes booked time", () => {
     const slots = generateSlots({
       from: new Date("2026-05-04T06:00:00.000Z"),
       to: new Date("2026-05-04T09:00:00.000Z"),
@@ -28,6 +28,7 @@ describe("scheduling", () => {
           weekday: 1,
           startMinute: 9 * 60,
           endMinute: 11 * 60,
+          location: "Main clinic",
           active: true,
         },
       ],
@@ -43,9 +44,9 @@ describe("scheduling", () => {
     expect(slots.map((slot) => slot.startsAt.toISOString())).toEqual([
       "2026-05-04T06:00:00.000Z",
       "2026-05-04T07:00:00.000Z",
-      "2026-05-04T07:15:00.000Z",
       "2026-05-04T07:30:00.000Z",
     ]);
+    expect(slots[0]?.location).toBe("Main clinic");
   });
 
   it("can include taken candidates for a visible schedule", () => {
@@ -59,6 +60,7 @@ describe("scheduling", () => {
           weekday: 1,
           startMinute: 9 * 60,
           endMinute: 11 * 60,
+          location: "Main clinic",
           active: true,
         },
       ],
@@ -78,12 +80,52 @@ describe("scheduling", () => {
       })),
     ).toEqual([
       { startsAt: "2026-05-04T06:00:00.000Z", status: "AVAILABLE" },
-      { startsAt: "2026-05-04T06:15:00.000Z", status: "TAKEN" },
       { startsAt: "2026-05-04T06:30:00.000Z", status: "TAKEN" },
-      { startsAt: "2026-05-04T06:45:00.000Z", status: "TAKEN" },
       { startsAt: "2026-05-04T07:00:00.000Z", status: "AVAILABLE" },
-      { startsAt: "2026-05-04T07:15:00.000Z", status: "AVAILABLE" },
       { startsAt: "2026-05-04T07:30:00.000Z", status: "AVAILABLE" },
+    ]);
+  });
+
+  it("uses buffer time to advance generated starts and block after booked appointments", () => {
+    const slots = generateScheduleSlots({
+      from: new Date("2026-05-04T06:00:00.000Z"),
+      to: new Date("2026-05-04T09:00:00.000Z"),
+      timeZone: "Europe/Helsinki",
+      durationMinutes: 30,
+      bufferMinutes: 10,
+      availability: [
+        {
+          weekday: 1,
+          startMinute: 9 * 60,
+          endMinute: 12 * 60,
+          location: "East clinic",
+          active: true,
+        },
+      ],
+      timeOff: [],
+      booked: [
+        {
+          startsAt: new Date("2026-05-04T06:00:00.000Z"),
+          endsAt: new Date("2026-05-04T06:30:00.000Z"),
+        },
+        {
+          startsAt: new Date("2026-05-04T08:00:00.000Z"),
+          endsAt: new Date("2026-05-04T08:30:00.000Z"),
+        },
+      ],
+    });
+
+    expect(
+      slots.map((slot) => ({
+        location: slot.location,
+        startsAt: slot.startsAt.toISOString(),
+        status: slot.status,
+      })),
+    ).toEqual([
+      { startsAt: "2026-05-04T06:00:00.000Z", status: "TAKEN", location: "East clinic" },
+      { startsAt: "2026-05-04T06:45:00.000Z", status: "AVAILABLE", location: "East clinic" },
+      { startsAt: "2026-05-04T07:30:00.000Z", status: "TAKEN", location: "East clinic" },
+      { startsAt: "2026-05-04T08:15:00.000Z", status: "TAKEN", location: "East clinic" },
     ]);
   });
 });
