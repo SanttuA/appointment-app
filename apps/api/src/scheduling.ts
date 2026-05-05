@@ -127,6 +127,14 @@ function bufferedRange(range: TimeRange, bufferMinutes: number) {
   };
 }
 
+export function bufferedConflictLookupRange(range: TimeRange, bufferMinutes = 0) {
+  const bufferMilliseconds = bufferMinutes * 60_000;
+  return {
+    startsAt: new Date(range.startsAt.getTime() - bufferMilliseconds),
+    endsAt: new Date(range.endsAt.getTime() + bufferMilliseconds),
+  };
+}
+
 function generateCandidateSlots(input: GenerateSlotsInput) {
   const slots: Slot[] = [];
   const startStepMinutes = Math.max(

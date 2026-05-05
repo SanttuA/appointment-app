@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { generateScheduleSlots, generateSlots, overlaps } from "../src/scheduling.js";
+import {
+  bufferedConflictLookupRange,
+  generateScheduleSlots,
+  generateSlots,
+  overlaps,
+} from "../src/scheduling.js";
 
 describe("scheduling", () => {
   it("detects overlapping appointment ranges", () => {
@@ -127,5 +132,47 @@ describe("scheduling", () => {
       { startsAt: "2026-05-04T07:30:00.000Z", status: "TAKEN", location: "East clinic" },
       { startsAt: "2026-05-04T08:15:00.000Z", status: "TAKEN", location: "East clinic" },
     ]);
+  });
+
+  it("widens conflict lookup ranges enough to include buffer-adjacent appointments", () => {
+    const requestedSlot = {
+      startsAt: new Date("2026-05-04T07:30:00.000Z"),
+      endsAt: new Date("2026-05-04T08:00:00.000Z"),
+    };
+    const previousAppointment = {
+      startsAt: new Date("2026-05-04T07:00:00.000Z"),
+      endsAt: new Date("2026-05-04T07:30:00.000Z"),
+    };
+    const nextAppointment = {
+      startsAt: new Date("2026-05-04T08:00:00.000Z"),
+      endsAt: new Date("2026-05-04T08:30:00.000Z"),
+    };
+
+    const lookupRange = bufferedConflictLookupRange(requestedSlot, 10);
+
+    expect(lookupRange.startsAt.toISOString()).toBe("2026-05-04T07:20:00.000Z");
+    expect(lookupRange.endsAt.toISOString()).toBe("2026-05-04T08:10:00.000Z");
+    expect(overlaps(lookupRange, previousAppointment)).toBe(true);
+    expect(overlaps(lookupRange, nextAppointment)).toBe(true);
+    expect(
+      generateSlots({
+        from: requestedSlot.startsAt,
+        to: requestedSlot.endsAt,
+        timeZone: "Europe/Helsinki",
+        durationMinutes: 30,
+        bufferMinutes: 10,
+        availability: [
+          {
+            weekday: 1,
+            startMinute: 10 * 60 + 30,
+            endMinute: 11 * 60,
+            location: "Main clinic",
+            active: true,
+          },
+        ],
+        timeOff: [],
+        booked: [previousAppointment],
+      }),
+    ).toEqual([]);
   });
 });

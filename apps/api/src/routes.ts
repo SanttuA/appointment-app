@@ -17,6 +17,7 @@ import { AppointmentStatus, Locale, Role, type Prisma } from "./generated/prisma
 import {
   assertSlotIncrement,
   bookingHorizonDays,
+  bufferedConflictLookupRange,
   generateScheduleSlots,
   generateSlots,
   overlaps,
@@ -210,11 +211,15 @@ async function assertAvailableSlot(input: {
   }
 
   const endsAt = new Date(input.startsAt.getTime() + worker.appointmentDurationMinutes * 60_000);
+  const conflictLookupRange = bufferedConflictLookupRange(
+    { startsAt: input.startsAt, endsAt },
+    worker.bufferMinutes,
+  );
   const bookedWhere: Prisma.AppointmentWhereInput = {
     workerProfileId: input.workerProfileId,
     status: AppointmentStatus.CONFIRMED,
-    startsAt: { lt: endsAt },
-    endsAt: { gt: input.startsAt },
+    startsAt: { lt: conflictLookupRange.endsAt },
+    endsAt: { gt: conflictLookupRange.startsAt },
   };
   if (input.excludeAppointmentId) {
     bookedWhere.id = { not: input.excludeAppointmentId };
@@ -518,12 +523,16 @@ function registerCatalogRoutes(app: FastifyInstance) {
       throw new ApiError(400, "SERVICE_NOT_AVAILABLE", "Service is not available for this worker");
     }
 
+    const conflictLookupRange = bufferedConflictLookupRange(
+      { startsAt: from, endsAt: to },
+      worker.bufferMinutes,
+    );
     const booked = await prisma.appointment.findMany({
       where: {
         workerProfileId: worker.id,
         status: AppointmentStatus.CONFIRMED,
-        startsAt: { lt: to },
-        endsAt: { gt: from },
+        startsAt: { lt: conflictLookupRange.endsAt },
+        endsAt: { gt: conflictLookupRange.startsAt },
       },
     });
 
