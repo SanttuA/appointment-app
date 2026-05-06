@@ -184,9 +184,7 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await expect(page.getByTestId("appointment-card-appointment-one")).toContainText("Canceled");
 });
 
-test("patient cancellation confirmation blocks appointments inside the cutoff", async ({
-  page,
-}) => {
+test("patient cancellation confirmation lets the API decide cutoff state", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
 
   const service = {
@@ -224,19 +222,25 @@ test("patient cancellation confirmation blocks appointments inside the cutoff", 
     status: "CONFIRMED",
     worker,
   };
-  let cancelRequestSent = false;
+  let currentAppointments = [appointment];
+  let cancelRequest: Record<string, unknown> | null = null;
 
   await page.route("http://localhost:4000/auth/me", async (route) => {
     await route.fulfill({ json: { user: patient } });
   });
   await page.route("http://localhost:4000/appointments", async (route) => {
-    await route.fulfill({ json: { appointments: [appointment] } });
+    await route.fulfill({ json: { appointments: currentAppointments } });
   });
   await page.route(
     "http://localhost:4000/appointments/appointment-cutoff/cancel",
     async (route) => {
-      cancelRequestSent = true;
-      await route.fulfill({ status: 400, json: { error: { code: "CANCELLATION_WINDOW_CLOSED" } } });
+      cancelRequest = route.request().postDataJSON() as Record<string, unknown>;
+      currentAppointments = currentAppointments.map((currentAppointment) =>
+        currentAppointment.id === appointment.id
+          ? { ...currentAppointment, status: "CANCELED" }
+          : currentAppointment,
+      );
+      await route.fulfill({ json: { appointment: currentAppointments[0] } });
     },
   );
   await page.route("http://localhost:4000/services", async (route) => {
@@ -257,13 +261,23 @@ test("patient cancellation confirmation blocks appointments inside the cutoff", 
     .click();
 
   const cancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
-  await expect(cancelDialog).toContainText("This appointment can no longer be canceled.");
-  await expect(cancelDialog.getByRole("button", { name: "Cancel appointment" })).toHaveCount(0);
-  expect(cancelRequestSent).toBe(false);
+  await expect(cancelDialog).toContainText("less than 24 hours");
+  expect(cancelRequest).toBeNull();
 
   await cancelDialog.getByRole("button", { name: "Keep appointment" }).click();
   await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
-  expect(cancelRequestSent).toBe(false);
+  expect(cancelRequest).toBeNull();
+
+  await page
+    .getByTestId("appointment-card-appointment-cutoff")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Cancel appointment?" })
+    .getByRole("button", { name: "Cancel appointment" })
+    .click();
+  await expect.poll(() => cancelRequest?.reason).toBe("Canceled by user");
+  await expect(page.getByTestId("appointment-card-appointment-cutoff")).toContainText("Canceled");
 });
 
 test("calendar selection recenters the 14-day date strip", async ({ page }) => {
