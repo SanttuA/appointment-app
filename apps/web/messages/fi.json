@@ -92,6 +92,10 @@
     "SERVICE_NOT_AVAILABLE": "Valittu palvelu ei ole saatavilla tältä työntekijältä.",
     "SLOT_UNAVAILABLE": "Valittu aika ei ole enää saatavilla.",
     "START_DATE_INVALID": "Valitse kelvollinen ajanvarausaika.",
+    "END_DATE_INVALID": "Valitse kelvollinen päättymisaika.",
+    "DATE_RANGE_INVALID": "Päättymisajan on oltava alkamisen jälkeen.",
+    "APPOINTMENT_NOT_ACTIVE": "Vain aktiivisia ajanvarauksia voi päivittää.",
+    "APPOINTMENT_NOT_STARTED": "Ajanvarauksen tilaa voi päivittää vasta alkamisen jälkeen.",
     "VALIDATION_FAILED": "Tarkista lomakkeen kentät ja yritä uudelleen."
   },
   "fields": {
@@ -111,10 +115,13 @@
     "appointmentBooked": "Aika varattu.",
     "appointmentCanceled": "Aika peruttu.",
     "appointmentRescheduled": "Aika vaihdettu.",
+    "appointmentUpdated": "Ajanvaraus päivitetty.",
     "availabilitySaved": "Saatavuus tallennettu.",
     "serviceCreated": "Palvelu luotu.",
     "signedIn": "Kirjauduttu sisään.",
     "signedOut": "Kirjauduttu ulos.",
+    "timeBlocked": "Aika estetty.",
+    "timeBlockRemoved": "Esto poistettu.",
     "userCreated": "Käyttäjä luotu."
   },
   "roles": {
@@ -123,17 +130,77 @@
     "worker": "Terveydenhuollon työntekijä"
   },
   "weekdays": {
+    "0": "Su",
     "1": "Ma",
     "2": "Ti",
     "3": "Ke",
     "4": "To",
-    "5": "Pe"
+    "5": "Pe",
+    "6": "La"
   },
   "worker": {
+    "actions": {
+      "markDone": "Merkitse valmiiksi",
+      "noShow": "Ei saapunut"
+    },
+    "agenda": {
+      "empty": "Tälle päivälle ei ole ajanvarauksia tai estoja.",
+      "title": "Päivän lista"
+    },
+    "block": {
+      "add": "Estä aika",
+      "addShort": "Estä aika",
+      "addForDate": "Estä aika päivälle {date}",
+      "blocked": "Estetty",
+      "clear": "Tyhjennä tauko",
+      "defaultReason": "Lounastauko",
+      "from": "Alkaa",
+      "reason": "Syy",
+      "save": "Tallenna esto",
+      "subtitle": "Estä lounas, hallintotyö, loma tai poissaolo.",
+      "title": "Estä aika",
+      "to": "Päättyy"
+    },
+    "days": "{count, plural, one {# päivä} other {# päivää}}",
     "end": "Päättymisaika",
+    "hours": "{count, plural, =0 {Ei ilmoitusaikaa} one {# tunti} other {# tuntia}}",
+    "minutes": "{count, plural, =0 {Ei puskuria} one {# minuutti} other {# minuuttia}}",
+    "now": "Nyt",
+    "off": "Pois",
+    "on": "Päällä",
     "saveAvailability": "Tallenna saatavuus",
+    "schedule": {
+      "bookingWindow": "Varausikkuna (päivää)",
+      "breaks": "Tauot (aktiivisille päiville)",
+      "buffer": "Puskuri ajanvarausten välillä",
+      "duration": "Ajanvarauksen kesto",
+      "minimumNotice": "Vähimmäisilmoitusaika",
+      "slotSettings": "Aikojen asetukset",
+      "subtitle": "Muutokset vaikuttavat potilaille näytettäviin aikoihin heti.",
+      "title": "Oma aikataulu",
+      "workingHours": "Työajat päivittäin"
+    },
+    "slotCount": "{count, plural, one {# aika} other {# aikaa}}",
     "start": "Alkamisaika",
+    "tabs": {
+      "agenda": "Päivän lista",
+      "schedule": "Oma aikataulu",
+      "week": "Viikkonäkymä"
+    },
+    "tabsLabel": "Työntekijän työtila",
+    "timeOff": {
+      "empty": "Ei tulevia estettyjä aikoja.",
+      "remove": "Poista",
+      "title": "Estot ja poissaolot"
+    },
     "title": "Työntekijän aikataulu",
+    "week": {
+      "emptyDay": "Ei tapahtumia.",
+      "next": "Seuraava viikko",
+      "previous": "Edellinen viikko",
+      "title": "Viikkonäkymä",
+      "today": "Tämä viikko"
+    },
     "weekdays": "Viikonpäivät"
   }
 }

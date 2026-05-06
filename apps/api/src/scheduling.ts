@@ -7,6 +7,7 @@ export const patientCancellationCutoffHours = 24;
 export type Slot = {
   startsAt: Date;
   endsAt: Date;
+  location?: string | null;
 };
 
 export type ScheduleSlot = Slot & {
@@ -106,13 +107,47 @@ type GenerateSlotsInput = {
   to: Date;
   timeZone: string;
   durationMinutes: number;
-  availability: Pick<AvailabilityWindow, "weekday" | "startMinute" | "endMinute" | "active">[];
+  bufferMinutes?: number;
+  availability: Pick<
+    AvailabilityWindow,
+    "weekday" | "startMinute" | "endMinute" | "active" | "location"
+  >[];
   timeOff: Pick<TimeOff, "startsAt" | "endsAt">[];
   booked: Pick<Appointment, "startsAt" | "endsAt">[];
 };
 
+function ceilToSlotStep(minutes: number) {
+  return Math.ceil(minutes / slotStepMinutes) * slotStepMinutes;
+}
+
+function bufferedRange(range: TimeRange, bufferMinutes: number) {
+  return {
+    startsAt: range.startsAt,
+    endsAt: new Date(range.endsAt.getTime() + bufferMinutes * 60_000),
+  };
+}
+
+export function bufferedConflictLookupRange(range: TimeRange, bufferMinutes = 0) {
+  const bufferMilliseconds = bufferMinutes * 60_000;
+  return {
+    startsAt: new Date(range.startsAt.getTime() - bufferMilliseconds),
+    endsAt: new Date(range.endsAt.getTime() + bufferMilliseconds),
+  };
+}
+
+export function appointmentHasStarted(
+  appointment: Pick<Appointment, "startsAt">,
+  now = new Date(),
+) {
+  return appointment.startsAt <= now;
+}
+
 function generateCandidateSlots(input: GenerateSlotsInput) {
   const slots: Slot[] = [];
+  const startStepMinutes = Math.max(
+    slotStepMinutes,
+    ceilToSlotStep(input.durationMinutes + (input.bufferMinutes ?? 0)),
+  );
   const start = utcDayStart(input.from);
   start.setUTCDate(start.getUTCDate() - 1);
   const end = utcDayStart(input.to);
@@ -128,7 +163,7 @@ function generateCandidateSlots(input: GenerateSlotsInput) {
 
     for (const window of windows) {
       const lastStart = window.endMinute - input.durationMinutes;
-      for (let minute = window.startMinute; minute <= lastStart; minute += slotStepMinutes) {
+      for (let minute = window.startMinute; minute <= lastStart; minute += startStepMinutes) {
         const startsAt = zonedTimeToUtc({
           year: parts.year,
           month: parts.month,
@@ -137,7 +172,7 @@ function generateCandidateSlots(input: GenerateSlotsInput) {
           timeZone: input.timeZone,
         });
         const endsAt = new Date(startsAt.getTime() + input.durationMinutes * 60_000);
-        const candidate = { startsAt, endsAt };
+        const candidate = { startsAt, endsAt, location: window.location };
 
         if (startsAt < input.from || endsAt > input.to) continue;
         if (input.timeOff.some((blocked) => overlaps(candidate, blocked))) continue;
@@ -151,14 +186,23 @@ function generateCandidateSlots(input: GenerateSlotsInput) {
 }
 
 export function generateSlots(input: GenerateSlotsInput) {
+  const bufferMinutes = input.bufferMinutes ?? 0;
   return generateCandidateSlots(input).filter(
-    (slot) => !input.booked.some((booked) => overlaps(slot, booked)),
+    (slot) =>
+      !input.booked.some((booked) =>
+        overlaps(bufferedRange(slot, bufferMinutes), bufferedRange(booked, bufferMinutes)),
+      ),
   );
 }
 
 export function generateScheduleSlots(input: GenerateSlotsInput): ScheduleSlot[] {
+  const bufferMinutes = input.bufferMinutes ?? 0;
   return generateCandidateSlots(input).map((slot) => ({
     ...slot,
-    status: input.booked.some((booked) => overlaps(slot, booked)) ? "TAKEN" : "AVAILABLE",
+    status: input.booked.some((booked) =>
+      overlaps(bufferedRange(slot, bufferMinutes), bufferedRange(booked, bufferMinutes)),
+    )
+      ? "TAKEN"
+      : "AVAILABLE",
   }));
 }

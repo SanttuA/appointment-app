@@ -92,6 +92,10 @@
     "SERVICE_NOT_AVAILABLE": "The selected service is not available for this worker.",
     "SLOT_UNAVAILABLE": "That slot is no longer available.",
     "START_DATE_INVALID": "Choose a valid appointment time.",
+    "END_DATE_INVALID": "Choose a valid end time.",
+    "DATE_RANGE_INVALID": "End time must be after start time.",
+    "APPOINTMENT_NOT_ACTIVE": "Only active appointments can be updated.",
+    "APPOINTMENT_NOT_STARTED": "Appointment status can only be updated after the start time.",
     "VALIDATION_FAILED": "Check the form fields and try again."
   },
   "fields": {
@@ -111,10 +115,13 @@
     "appointmentBooked": "Appointment booked.",
     "appointmentCanceled": "Appointment canceled.",
     "appointmentRescheduled": "Appointment rescheduled.",
+    "appointmentUpdated": "Appointment updated.",
     "availabilitySaved": "Availability saved.",
     "serviceCreated": "Service created.",
     "signedIn": "Signed in.",
     "signedOut": "Signed out.",
+    "timeBlocked": "Time blocked.",
+    "timeBlockRemoved": "Time block removed.",
     "userCreated": "User created."
   },
   "roles": {
@@ -123,17 +130,77 @@
     "worker": "Healthcare worker"
   },
   "weekdays": {
+    "0": "Sun",
     "1": "Mon",
     "2": "Tue",
     "3": "Wed",
     "4": "Thu",
-    "5": "Fri"
+    "5": "Fri",
+    "6": "Sat"
   },
   "worker": {
+    "actions": {
+      "markDone": "Mark done",
+      "noShow": "No-show"
+    },
+    "agenda": {
+      "empty": "No appointments or blocks today.",
+      "title": "Today's agenda"
+    },
+    "block": {
+      "add": "Block time",
+      "addShort": "Block time",
+      "addForDate": "Block time on {date}",
+      "blocked": "Blocked",
+      "clear": "Clear break",
+      "defaultReason": "Lunch break",
+      "from": "From",
+      "reason": "Reason",
+      "save": "Save block",
+      "subtitle": "Block lunch, admin time, vacation, or unexpected absence.",
+      "title": "Block time",
+      "to": "To"
+    },
+    "days": "{count, plural, one {# day} other {# days}}",
     "end": "End time",
+    "hours": "{count, plural, =0 {No notice} one {# hour} other {# hours}}",
+    "minutes": "{count, plural, =0 {No buffer} one {# minute} other {# minutes}}",
+    "now": "Now",
+    "off": "Off",
+    "on": "On",
     "saveAvailability": "Save availability",
+    "schedule": {
+      "bookingWindow": "Booking window (days)",
+      "breaks": "Break times (apply to active days)",
+      "buffer": "Buffer between appointments",
+      "duration": "Appointment duration",
+      "minimumNotice": "Minimum notice",
+      "slotSettings": "Slot settings",
+      "subtitle": "Changes apply to generated patient slots immediately.",
+      "title": "My schedule",
+      "workingHours": "Working hours per day"
+    },
+    "slotCount": "{count, plural, one {# slot} other {# slots}}",
     "start": "Start time",
+    "tabs": {
+      "agenda": "Today's agenda",
+      "schedule": "My schedule",
+      "week": "Week view"
+    },
+    "tabsLabel": "Worker workspace",
+    "timeOff": {
+      "empty": "No upcoming blocked time.",
+      "remove": "Remove",
+      "title": "Blocked time and leave"
+    },
     "title": "Worker schedule",
+    "week": {
+      "emptyDay": "No events.",
+      "next": "Next week",
+      "previous": "Previous week",
+      "title": "Week view",
+      "today": "This week"
+    },
     "weekdays": "Weekdays"
   }
 }
