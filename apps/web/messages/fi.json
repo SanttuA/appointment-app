@@ -78,6 +78,30 @@
     "time": "Aika",
     "title": "Varaa aika"
   },
+  "confirmations": {
+    "block": {
+      "confirm": "Poista esto",
+      "description": "Tämä vapauttaa ajan aikataulustasi.",
+      "keep": "Säilytä estetty aika",
+      "title": "Poistetaanko estetty aika?"
+    },
+    "cancel": {
+      "confirm": "Peru ajanvaraus",
+      "description": "Toimintoa ei voi kumota. Aika vapautuu heti muiden potilaiden varattavaksi.",
+      "keep": "Säilytä ajanvaraus",
+      "policyWarning": "Alle 24 tuntia ennen ajanvarausta tehdyt peruutukset voivat vaikuttaa tulevien varausten etusijaan.",
+      "title": "Perutaanko ajanvaraus?"
+    },
+    "status": {
+      "completedDescription": "Tämä merkitsee ajanvarauksen toteutuneeksi.",
+      "completedTitle": "Merkitäänkö ajanvaraus toteutuneeksi?",
+      "confirmCompleted": "Merkitse valmiiksi",
+      "confirmNoShow": "Merkitse ei saapunut",
+      "keep": "Pidä vahvistettuna",
+      "noShowDescription": "Tämä merkitsee, ettei potilas saapunut ajanvaraukseen.",
+      "noShowTitle": "Merkitäänkö potilas ei saapuneeksi?"
+    }
+  },
   "errors": {
     "AUTH_REQUIRED": "Kirjaudu ensin sisään.",
     "BOOKING_WINDOW_INVALID": "Valittu aika on varausikkunan ulkopuolella.",

@@ -78,6 +78,30 @@
     "time": "Time",
     "title": "Book an appointment"
   },
+  "confirmations": {
+    "block": {
+      "confirm": "Remove block",
+      "description": "This reopens the time in your schedule.",
+      "keep": "Keep blocked time",
+      "title": "Remove blocked time?"
+    },
+    "cancel": {
+      "confirm": "Cancel appointment",
+      "description": "This action cannot be undone. The slot will become available to other patients immediately.",
+      "keep": "Keep appointment",
+      "policyWarning": "Cancellations less than 24 hours before the appointment may affect future booking priority.",
+      "title": "Cancel appointment?"
+    },
+    "status": {
+      "completedDescription": "This updates the appointment as completed.",
+      "completedTitle": "Mark appointment done?",
+      "confirmCompleted": "Mark done",
+      "confirmNoShow": "Mark no-show",
+      "keep": "Keep as confirmed",
+      "noShowDescription": "This records that the patient did not arrive for the appointment.",
+      "noShowTitle": "Mark appointment no-show?"
+    }
+  },
   "errors": {
     "AUTH_REQUIRED": "Please sign in first.",
     "BOOKING_WINDOW_INVALID": "The selected time is outside the booking window.",
