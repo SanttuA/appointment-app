@@ -819,7 +819,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       : "";
   const bookingDialogLocation = confirmedAppointment
     ? appointmentLocation(confirmedAppointment)
-    : (bookingDialogWorker?.location ?? "");
+    : (bookingDialogContext?.slot.location ?? bookingDialogWorker?.location ?? "");
   const isReschedulingBooking = Boolean(reschedulingAppointment && bookingDialogContext);
   const slotActionLabel = reschedulingAppointment
     ? t("appointments.reschedule")

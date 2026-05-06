@@ -619,6 +619,7 @@ test("booking confirmation uses the context captured when the dialog opened", as
   };
   const slot = {
     endsAt: `${tomorrow}T09:30:00.000Z`,
+    location: "East clinic",
     startsAt: `${tomorrow}T09:00:00.000Z`,
     status: "AVAILABLE",
   };
@@ -682,6 +683,7 @@ test("booking confirmation uses the context captured when the dialog opened", as
 
   await page.goto("/en");
   await page.getByRole("button", { name: "Book" }).click();
+  await expect(page.getByRole("dialog")).toContainText("East clinic");
   await page.locator("select").nth(1).selectOption(secondService.id, { force: true });
   await expect(page.locator("select").nth(1)).toHaveValue(secondService.id);
   await page.getByRole("button", { name: "Confirm booking" }).click();
