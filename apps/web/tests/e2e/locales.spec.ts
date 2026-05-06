@@ -418,6 +418,131 @@ test("worker settings save uses a single atomic request", async ({ page }) => {
   expect(splitAvailabilityRequest).toBe(false);
 });
 
+test("worker settings save preserves per-day split windows", async ({ page }) => {
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-worker-breaks",
+    name: { en: "Break service", fi: "Taukopalvelu" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    bufferMinutes: 0,
+    bookingWindowDays: 90,
+    id: "worker-one",
+    location: "Main clinic",
+    minimumNoticeMinutes: 0,
+    name: "Dr. Per Day Breaks",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const windows = [
+    {
+      active: true,
+      endMinute: 720,
+      id: "window-monday-morning",
+      location: "Main clinic",
+      startMinute: 540,
+      weekday: 1,
+    },
+    {
+      active: true,
+      endMinute: 960,
+      id: "window-monday-afternoon",
+      location: "Main clinic",
+      startMinute: 750,
+      weekday: 1,
+    },
+    {
+      active: true,
+      endMinute: 960,
+      id: "window-tuesday",
+      location: "Main clinic",
+      startMinute: 540,
+      weekday: 2,
+    },
+  ];
+  let settingsRequest: {
+    windows?: Array<{
+      active: boolean;
+      endMinute: number;
+      location: string;
+      startMinute: number;
+      weekday: number;
+    }>;
+  } | null = null;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({
+      json: {
+        user: {
+          email: "worker@example.com",
+          id: "worker-user",
+          name: "Dr. Per Day Breaks",
+          phone: null,
+          preferredLocale: "en",
+          role: "WORKER",
+          workerProfile: worker,
+        },
+      },
+    });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: [] } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route("http://localhost:4000/worker/settings", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: { timeOff: [], windows, worker } });
+      return;
+    }
+    settingsRequest = route.request().postDataJSON() as NonNullable<typeof settingsRequest>;
+    await route.fulfill({ json: { timeOff: [], windows, worker } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+  await page.getByRole("tab", { name: "My schedule" }).click();
+  await expect(page.getByRole("textbox", { name: "From" })).toHaveValue("12:00");
+  await expect(page.getByRole("textbox", { name: "To" })).toHaveValue("12:30");
+  await page.getByRole("button", { name: "Save availability" }).click();
+
+  await expect
+    .poll(() => settingsRequest?.windows)
+    .toEqual([
+      {
+        active: true,
+        endMinute: 720,
+        location: "Main clinic",
+        startMinute: 540,
+        weekday: 1,
+      },
+      {
+        active: true,
+        endMinute: 960,
+        location: "Main clinic",
+        startMinute: 750,
+        weekday: 1,
+      },
+      {
+        active: true,
+        endMinute: 960,
+        location: "Main clinic",
+        startMinute: 540,
+        weekday: 2,
+      },
+    ]);
+});
+
 test("worker agenda shows patient details, status actions, and block time", async ({
   page,
 }, testInfo) => {

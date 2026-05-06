@@ -132,6 +132,8 @@ type WorkerDayForm = {
   start: string;
   end: string;
   location: string;
+  breakStart?: string;
+  breakEnd?: string;
 };
 
 type ApiErrorBody = {
@@ -953,6 +955,12 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
         start: minuteToTime(dayWindows[0]?.startMinute ?? 9 * 60),
         end: minuteToTime(dayWindows.at(-1)?.endMinute ?? 16 * 60),
         location: dayWindows[0]?.location ?? data.worker.location,
+        ...(dayWindows.length >= 2
+          ? {
+              breakStart: minuteToTime(dayWindows[0]?.endMinute ?? 12 * 60),
+              breakEnd: minuteToTime(dayWindows[1]?.startMinute ?? 12 * 60 + 30),
+            }
+          : {}),
       };
     });
     setWorkerDays(nextDays);
@@ -1357,17 +1365,15 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   async function saveAvailability(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const breakStartMinute = timeToMinute(workerBreakStart);
-    const breakEndMinute = timeToMinute(workerBreakEnd);
-    const hasBreak = Boolean(
-      workerBreakStart && workerBreakEnd && breakEndMinute > breakStartMinute,
-    );
     const windows = workerDays.flatMap((day) => {
       if (!day.active) return [];
       const startMinute = timeToMinute(day.start);
       const endMinute = timeToMinute(day.end);
       if (endMinute <= startMinute) return [];
       const location = day.location.trim() || workerLocation;
+      const breakStartMinute = timeToMinute(day.breakStart ?? "");
+      const breakEndMinute = timeToMinute(day.breakEnd ?? "");
+      const hasBreak = Boolean(day.breakStart && day.breakEnd && breakEndMinute > breakStartMinute);
       if (hasBreak && breakStartMinute > startMinute && breakEndMinute < endMinute) {
         return [
           {
@@ -1680,8 +1686,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     if (!day.active) return t("worker.off");
     const startMinute = timeToMinute(day.start);
     const endMinute = timeToMinute(day.end);
-    const breakStartMinute = timeToMinute(workerBreakStart);
-    const breakEndMinute = timeToMinute(workerBreakEnd);
+    const breakStartMinute = timeToMinute(day.breakStart ?? "");
+    const breakEndMinute = timeToMinute(day.breakEnd ?? "");
     const step = ceilToSlotStep(appointmentDurationMinutes + bufferMinutes);
     const countWindow = (start: number, end: number) =>
       end - start >= appointmentDurationMinutes
@@ -1704,6 +1710,40 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   function updateWorkerDay(weekday: number, patch: Partial<WorkerDayForm>) {
     setWorkerDays((current) =>
       current.map((day) => (day.weekday === weekday ? { ...day, ...patch } : day)),
+    );
+  }
+
+  function updateWorkerBreakStart(value: string) {
+    setWorkerBreakStart(value);
+    setWorkerDays((current) =>
+      current.map((day) =>
+        day.active ? { ...day, breakStart: value, breakEnd: day.breakEnd ?? workerBreakEnd } : day,
+      ),
+    );
+  }
+
+  function updateWorkerBreakEnd(value: string) {
+    setWorkerBreakEnd(value);
+    setWorkerDays((current) =>
+      current.map((day) =>
+        day.active
+          ? { ...day, breakStart: day.breakStart ?? workerBreakStart, breakEnd: value }
+          : day,
+      ),
+    );
+  }
+
+  function clearWorkerBreaks() {
+    setWorkerBreakStart("");
+    setWorkerBreakEnd("");
+    setWorkerDays((current) =>
+      current.map((day) => ({
+        weekday: day.weekday,
+        active: day.active,
+        start: day.start,
+        end: day.end,
+        location: day.location,
+      })),
     );
   }
 
@@ -2013,7 +2053,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                   <label className="field min-w-0">
                     <span>{t("worker.block.from")}</span>
                     <input
-                      onChange={(event) => setWorkerBreakStart(event.target.value)}
+                      onChange={(event) => updateWorkerBreakStart(event.target.value)}
                       step={900}
                       type="time"
                       value={workerBreakStart}
@@ -2022,7 +2062,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                   <label className="field min-w-0">
                     <span>{t("worker.block.to")}</span>
                     <input
-                      onChange={(event) => setWorkerBreakEnd(event.target.value)}
+                      onChange={(event) => updateWorkerBreakEnd(event.target.value)}
                       step={900}
                       type="time"
                       value={workerBreakEnd}
@@ -2031,10 +2071,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                   <button
                     aria-label={t("worker.block.clear")}
                     className="btn-secondary flex items-center justify-center"
-                    onClick={() => {
-                      setWorkerBreakStart("");
-                      setWorkerBreakEnd("");
-                    }}
+                    onClick={clearWorkerBreaks}
                     type="button"
                   >
                     <X aria-hidden="true" size={18} />
