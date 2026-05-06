@@ -1978,7 +1978,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                     className="min-w-0 overflow-hidden rounded-md border border-[var(--line)] p-3"
                     key={date}
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="grid min-w-0 gap-2">
                       <div>
                         <h3 className="font-bold">{weekdayLabel(date, locale)}</h3>
                         <p className="muted text-sm">{dayNumber(date)}</p>
@@ -1987,7 +1987,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                         aria-label={t("worker.block.addForDate", {
                           date: fullDateLabel(date, locale),
                         })}
-                        className="inline-flex h-9 max-w-[8.5rem] items-center justify-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-teal-600 hover:bg-teal-50"
+                        className="inline-flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-2 py-1.5 text-center text-sm font-semibold leading-tight text-[var(--foreground)] transition hover:border-teal-600 hover:bg-teal-50"
                         onClick={() => openBlockDialog(date)}
                         title={t("worker.block.addForDate", {
                           date: fullDateLabel(date, locale),
@@ -1995,7 +1995,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                         type="button"
                       >
                         <Plus aria-hidden="true" className="shrink-0" size={16} />
-                        <span className="min-w-0 truncate">{t("worker.block.addShort")}</span>
+                        <span className="min-w-0 break-words">{t("worker.block.addShort")}</span>
                       </button>
                     </div>
 
