@@ -386,6 +386,10 @@ function calendarDate(value: string) {
     .replace(/\.\d{3}Z$/, "Z");
 }
 
+function appointmentLocation(appointment: Appointment) {
+  return appointment.location ?? appointment.worker.location;
+}
+
 function calendarHref(appointment: Appointment, locale: Locale) {
   const service = serviceName(appointment.service, locale);
   const summary = `${service} - ${appointment.worker.name}`;
@@ -404,7 +408,7 @@ function calendarHref(appointment: Appointment, locale: Locale) {
     `DTEND:${calendarDate(appointment.endsAt)}`,
     `SUMMARY:${escapeCalendarText(summary)}`,
     `DESCRIPTION:${escapeCalendarText(description)}`,
-    `LOCATION:${escapeCalendarText(appointment.worker.location)}`,
+    `LOCATION:${escapeCalendarText(appointmentLocation(appointment))}`,
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");
@@ -813,8 +817,9 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     : bookingDialogSelectedService
       ? serviceName(bookingDialogSelectedService, locale)
       : "";
-  const bookingDialogLocation =
-    confirmedAppointment?.worker.location ?? bookingDialogWorker?.location ?? "";
+  const bookingDialogLocation = confirmedAppointment
+    ? appointmentLocation(confirmedAppointment)
+    : (bookingDialogWorker?.location ?? "");
   const isReschedulingBooking = Boolean(reschedulingAppointment && bookingDialogContext);
   const slotActionLabel = reschedulingAppointment
     ? t("appointments.reschedule")
@@ -1510,7 +1515,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           </p>
           <p className="muted mt-1 text-sm">
             {serviceName(appointment.service, locale)} · {appointment.worker.name} ·{" "}
-            {appointment.worker.location}
+            {appointmentLocation(appointment)}
           </p>
           {user?.role !== "PATIENT" ? (
             <p className="muted mt-1 text-sm">{appointment.patient.name}</p>
@@ -1550,7 +1555,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }
 
   function workerAppointmentLocation(appointment: Appointment) {
-    return appointment.location ?? appointment.worker.location;
+    return appointmentLocation(appointment);
   }
 
   function isCurrentAppointment(appointment: Appointment) {
@@ -2251,7 +2256,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                       <span className="font-bold">{t("appointments.next")}</span>
                       <p className="text-sm">
                         {appointmentFormatter(upcomingAppointment)} ·{" "}
-                        {upcomingAppointment.worker.location}
+                        {appointmentLocation(upcomingAppointment)}
                       </p>
                     </div>
                   </span>
@@ -2339,7 +2344,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                             <p className="font-bold">{t("booking.rescheduling")}</p>
                             <p className="text-sm">
                               {appointmentFormatter(reschedulingAppointment)} ·{" "}
-                              {reschedulingAppointment.worker.location}
+                              {appointmentLocation(reschedulingAppointment)}
                             </p>
                           </div>
                           <button

@@ -66,6 +66,7 @@ test("patients can reach appointments from tabs and the next appointment banner"
     {
       endsAt: "2026-05-07T06:30:00.000Z",
       id: "appointment-one",
+      location: "East clinic",
       patient,
       service,
       startsAt: "2026-05-07T06:00:00.000Z",
@@ -75,6 +76,7 @@ test("patients can reach appointments from tabs and the next appointment banner"
     {
       endsAt: "2026-05-20T07:00:00.000Z",
       id: "appointment-two",
+      location: null,
       patient,
       service,
       startsAt: "2026-05-20T06:30:00.000Z",
@@ -84,6 +86,7 @@ test("patients can reach appointments from tabs and the next appointment banner"
     {
       endsAt: "2026-04-03T07:30:00.000Z",
       id: "appointment-past",
+      location: "Archive clinic",
       patient,
       service,
       startsAt: "2026-04-03T07:00:00.000Z",
@@ -135,12 +138,18 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await expect(bookTab).toHaveAttribute("tabindex", "-1");
   await expect(page.getByRole("heading", { name: "Upcoming" })).toBeVisible();
   await expect(page.getByTestId("appointment-card-appointment-one")).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-one")).toContainText("East clinic");
   await expect(page.getByTestId("appointment-card-appointment-two")).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-two")).toContainText("Main clinic");
   await expect(page.getByRole("heading", { name: "Past" })).toBeVisible();
   await expect(page.getByTestId("appointment-card-appointment-past")).toBeVisible();
+  await expect(page.getByTestId("appointment-card-appointment-past")).toContainText(
+    "Archive clinic",
+  );
   await expect(page.getByText("Select a date. Dots show availability.")).toHaveCount(0);
 
   await bookTab.click();
+  await expect(page.getByRole("button", { name: /Next appointment.*East clinic/ })).toBeVisible();
   await page.getByRole("button", { name: /Next appointment/ }).click();
   await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("appointment-card-appointment-one")).toBeFocused();
@@ -640,6 +649,7 @@ test("booking confirmation uses the context captured when the dialog opened", as
             canceledAt: null,
             endsAt: slot.endsAt,
             id: "appointment-one",
+            location: "Booked clinic",
             patient: {
               email: "patient@example.com",
               id: "patient-user",
@@ -677,6 +687,7 @@ test("booking confirmation uses the context captured when the dialog opened", as
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
   await expect.poll(() => appointmentRequest?.serviceId).toBe(firstService.id);
+  await expect(page.getByText("Booked clinic")).toBeVisible();
   expect(appointmentRequest).toMatchObject({
     serviceId: firstService.id,
     startsAt: slot.startsAt,
