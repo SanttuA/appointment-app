@@ -924,6 +924,25 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   await expect(page.getByRole("button", { name: /Block time on/ }).first()).toContainText(
     "Block time",
   );
+  const dayBlockLayout = await page
+    .getByRole("button", { name: /Block time on/ })
+    .evaluateAll((buttons) => {
+      const buttonsContained = buttons.every((button) => {
+        const day = button.closest("section");
+        if (!day) return false;
+
+        const buttonRect = button.getBoundingClientRect();
+        const dayRect = day.getBoundingClientRect();
+        return buttonRect.left >= dayRect.left - 1 && buttonRect.right <= dayRect.right + 1;
+      });
+
+      return {
+        buttonCount: buttons.length,
+        buttonsContained,
+      };
+    });
+  expect(dayBlockLayout).toEqual({ buttonCount: 7, buttonsContained: true });
+
   const weekLayout = await page
     .locator('[data-testid^="worker-appointment-"]')
     .evaluateAll((cards) => {
