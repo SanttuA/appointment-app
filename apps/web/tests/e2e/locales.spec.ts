@@ -1200,6 +1200,307 @@ test("rescheduling updates the existing appointment instead of creating a new on
   await expect(page.getByTestId("appointment-card-appointment-one")).toBeFocused();
 });
 
+test("admins use a dedicated workspace with management drawers and read-only booking", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  type AdminTestService = {
+    active: boolean;
+    description: { en: string | null; fi: string | null };
+    id: string;
+    name: { en: string; fi: string };
+  };
+
+  const generalService: AdminTestService = {
+    active: true,
+    description: { en: "General appointments", fi: "Yleisajat" },
+    id: "service-general",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const bloodService: AdminTestService = {
+    active: false,
+    description: { en: null, fi: null },
+    id: "service-blood",
+    name: { en: "Blood test", fi: "Verikoe" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    bufferMinutes: 0,
+    bookingWindowDays: 90,
+    id: "worker-one",
+    location: "Main clinic",
+    minimumNoticeMinutes: 0,
+    name: "Dr. Aino Lehto",
+    services: [generalService],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const adminUser = {
+    active: true,
+    email: "admin@clinic.fi",
+    id: "admin-user",
+    name: "Admin User",
+    phone: null,
+    preferredLocale: "en",
+    role: "ADMIN",
+    workerProfile: null,
+  };
+  const workerUser = {
+    active: true,
+    email: "aino.lehto@clinic.fi",
+    id: "worker-user",
+    name: "Dr. Aino Lehto",
+    phone: null,
+    preferredLocale: "en",
+    role: "WORKER",
+    workerProfile: {
+      active: true,
+      appointmentDurationMinutes: 30,
+      bookingWindowDays: 90,
+      bufferMinutes: 0,
+      id: "worker-one",
+      location: "Main clinic",
+      minimumNoticeMinutes: 0,
+      timezone: "Europe/Helsinki",
+      title: "General practitioner",
+    },
+  };
+  const patientUser = {
+    active: false,
+    email: "matti@example.com",
+    id: "patient-user",
+    name: "Matti Virtanen",
+    phone: null,
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  let adminUsers = [adminUser, workerUser, patientUser];
+  let adminServices: AdminTestService[] = [generalService, bloodService];
+  const adminAppointments = [
+    {
+      endsAt: "2026-05-04T06:30:00.000Z",
+      id: "appointment-today",
+      location: "Main clinic",
+      patient: patientUser,
+      service: generalService,
+      startsAt: "2026-05-04T06:00:00.000Z",
+      status: "CONFIRMED",
+      worker,
+    },
+    {
+      canceledAt: "2026-05-04T07:00:00.000Z",
+      endsAt: "2026-05-06T06:30:00.000Z",
+      id: "appointment-canceled",
+      location: "Main clinic",
+      patient: patientUser,
+      service: generalService,
+      startsAt: "2026-05-06T06:00:00.000Z",
+      status: "CANCELED",
+      worker,
+    },
+  ];
+  const createdUsers: Array<Record<string, unknown>> = [];
+  const patchedUsers: Array<Record<string, unknown>> = [];
+  const createdServices: Array<Record<string, unknown>> = [];
+  const patchedServices: Array<Record<string, unknown>> = [];
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: adminUser } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: [] } });
+  });
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: adminServices.filter((service) => service.active) } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route("http://localhost:4000/admin/users", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      createdUsers.push(body);
+      const createdUser = {
+        active: true,
+        email: body.email,
+        id: "created-user",
+        name: body.name,
+        phone: null,
+        preferredLocale: body.preferredLocale,
+        role: body.role,
+        workerProfile:
+          body.role === "WORKER"
+            ? {
+                active: true,
+                appointmentDurationMinutes: 30,
+                bookingWindowDays: 90,
+                bufferMinutes: 0,
+                id: "created-worker",
+                location: (body.worker as { location?: string } | undefined)?.location,
+                minimumNoticeMinutes: 0,
+                timezone: "Europe/Helsinki",
+                title: "Healthcare worker",
+              }
+            : null,
+      };
+      adminUsers = [...adminUsers, createdUser as typeof workerUser];
+      await route.fulfill({ json: { user: createdUser } });
+      return;
+    }
+
+    await route.fulfill({ json: { users: adminUsers } });
+  });
+  await page.route("http://localhost:4000/admin/users/worker-user", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    patchedUsers.push(body);
+    adminUsers = adminUsers.map((adminListUser) =>
+      adminListUser.id === "worker-user" ? { ...adminListUser, ...body } : adminListUser,
+    );
+    await route.fulfill({ json: { user: adminUsers.find((item) => item.id === "worker-user") } });
+  });
+  await page.route("http://localhost:4000/admin/services", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      createdServices.push(body);
+      const createdService = {
+        active: Boolean(body.active),
+        description: {
+          en: (body.descriptionEn as string | null) ?? null,
+          fi: (body.descriptionFi as string | null) ?? null,
+        },
+        id: "created-service",
+        name: { en: String(body.nameEn), fi: String(body.nameFi) },
+      };
+      adminServices = [...adminServices, createdService];
+      await route.fulfill({ json: { service: createdService } });
+      return;
+    }
+
+    await route.fulfill({ json: { services: adminServices } });
+  });
+  await page.route("http://localhost:4000/admin/services/service-general", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    patchedServices.push(body);
+    adminServices = adminServices.map((service) =>
+      service.id === "service-general"
+        ? {
+            ...service,
+            active: Boolean(body.active),
+            description: {
+              en: (body.descriptionEn as string | null) ?? null,
+              fi: (body.descriptionFi as string | null) ?? null,
+            },
+            name: { en: String(body.nameEn), fi: String(body.nameFi) },
+          }
+        : service,
+    );
+    await route.fulfill({
+      json: { service: adminServices.find((service) => service.id === "service-general") },
+    });
+  });
+  await page.route("http://localhost:4000/admin/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: adminAppointments } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    const url = new URL(route.request().url());
+    const from = url.searchParams.get("from") ?? "";
+    const day = from.startsWith("2026-05-03") ? "2026-05-04" : "2026-05-05";
+    await route.fulfill({
+      json: {
+        slots: [
+          {
+            endsAt: `${day}T06:30:00.000Z`,
+            location: "Main clinic",
+            startsAt: `${day}T06:00:00.000Z`,
+            status: "AVAILABLE",
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto("/en");
+
+  await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
+  await expect(page.getByText("Appointments today")).toBeVisible();
+  await expect(page.getByText("Matti Virtanen · Dr. Aino Lehto")).toBeVisible();
+
+  await page.getByRole("tab", { name: /Users\s+3/ }).click();
+  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+  const workerRow = page.getByTestId("admin-user-row-worker-user");
+  await expect(workerRow).toContainText("Healthcare worker");
+  await expect(workerRow).toContainText("Main clinic");
+  await expect(workerRow).toContainText("Active");
+
+  await page.getByRole("button", { name: "Add user" }).click();
+  let drawer = page.getByRole("dialog", { name: "Add user" });
+  await drawer.getByLabel("Name").fill("New Worker");
+  await drawer.getByLabel("Email").fill("new.worker@example.com");
+  await drawer.getByLabel("Location").fill("West clinic");
+  await drawer.getByRole("button", { name: "Create user" }).click();
+  await expect.poll(() => createdUsers[0]?.email).toBe("new.worker@example.com");
+  expect(createdUsers[0]).toMatchObject({
+    name: "New Worker",
+    preferredLocale: "en",
+    role: "WORKER",
+    worker: { location: "West clinic" },
+  });
+
+  await page
+    .getByTestId("admin-user-row-worker-user")
+    .getByRole("button", { name: "Edit" })
+    .click();
+  drawer = page.getByRole("dialog", { name: "Edit user" });
+  await drawer.getByLabel("Name").fill("Dr. Aino Lehto Updated");
+  await drawer.getByLabel("Phone").fill("+358 40 123 4567");
+  await drawer.getByLabel("Active").uncheck();
+  await drawer.getByRole("button", { name: "Save user" }).click();
+  await expect.poll(() => patchedUsers[0]?.name).toBe("Dr. Aino Lehto Updated");
+  expect(patchedUsers[0]).toMatchObject({
+    active: false,
+    phone: "+358 40 123 4567",
+    preferredLocale: "en",
+  });
+
+  await page.getByRole("tab", { name: "Services" }).click();
+  await expect(page.getByRole("heading", { name: "Services" })).toBeVisible();
+  const serviceRow = page.getByTestId("admin-service-row-service-general");
+  await expect(serviceRow).toContainText("30 min slots");
+  await expect(serviceRow).toContainText("Main clinic");
+
+  await page.getByRole("button", { name: "Add service" }).click();
+  drawer = page.getByRole("dialog", { name: "Add service" });
+  await drawer.getByLabel("Service name in English").fill("Nurse consultation");
+  await drawer.getByLabel("Service name in Finnish").fill("Sairaanhoitaja");
+  await drawer.getByLabel("Description in English").fill("Short nurse appointment");
+  await drawer.getByRole("button", { name: "Create service" }).click();
+  await expect.poll(() => createdServices[0]?.nameEn).toBe("Nurse consultation");
+
+  await page
+    .getByTestId("admin-service-row-service-general")
+    .getByRole("button", { name: "Edit" })
+    .click();
+  drawer = page.getByRole("dialog", { name: "Edit service" });
+  await drawer.getByLabel("Service name in English").fill("General practice updated");
+  await drawer.getByLabel("Active").uncheck();
+  await drawer.getByRole("button", { name: "Save service" }).click();
+  await expect.poll(() => patchedServices[0]?.nameEn).toBe("General practice updated");
+  expect(patchedServices[0]).toMatchObject({ active: false });
+
+  await page.getByRole("tab", { name: "Booking view" }).click();
+  await expect(page.getByRole("heading", { name: "Booking view" })).toBeVisible();
+  await expect(page.getByText("Read-only reference")).toBeVisible();
+  await expect(page.getByText("Available").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Book" })).toHaveCount(0);
+});
+
 test.describe("local timezone booking window", () => {
   test.use({ timezoneId: "America/Los_Angeles" });
 

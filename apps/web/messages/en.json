@@ -1,12 +1,78 @@
 {
   "admin": {
-    "createService": "Create service",
-    "createUser": "Create user",
-    "saveService": "Save service",
-    "saveUser": "Save user",
+    "actions": {
+      "disable": "Disable",
+      "edit": "Edit",
+      "enable": "Enable"
+    },
+    "booking": {
+      "available": "Available",
+      "subtitle": "Read-only reference for checking patient-facing availability.",
+      "title": "Booking view"
+    },
+    "drawer": {
+      "close": "Close panel"
+    },
+    "empty": "—",
+    "overview": {
+      "acrossWorkers": "Across {count, plural, one {# worker} other {# workers}}",
+      "allWorkers": "All workers",
+      "appointmentsToday": "Appointments today",
+      "availableSlotsToday": "Available slots today",
+      "cancellationsThisWeek": "Cancellations this week",
+      "noAppointments": "No confirmed appointments today.",
+      "thisWeek": "Current calendar week",
+      "todaySchedule": "Today's appointments — {date}",
+      "totalUsers": "Total users",
+      "userBreakdown": "{workers} workers · {patients} patients"
+    },
     "serviceNameEn": "Service name in English",
     "serviceNameFi": "Service name in Finnish",
-    "title": "Admin controls"
+    "services": {
+      "add": "Add service",
+      "descriptionEn": "Description in English",
+      "descriptionFi": "Description in Finnish",
+      "drawerSubtitle": "Service availability depends on worker assignments and schedules.",
+      "duration": "{count} min slots",
+      "edit": "Edit service",
+      "empty": "No services yet.",
+      "noLocations": "No locations",
+      "noWorkers": "No assigned workers",
+      "saveEdit": "Save service",
+      "saveNew": "Create service",
+      "subtitle": "Manage patient-facing services and their active state.",
+      "title": "Services"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "tabs": {
+      "booking": "Booking view",
+      "overview": "Overview",
+      "services": "Services",
+      "users": "Users"
+    },
+    "tabsLabel": "Admin workspace",
+    "users": {
+      "add": "Add user",
+      "allClinics": "All clinics",
+      "columns": {
+        "actions": "Actions",
+        "email": "Email",
+        "location": "Location",
+        "name": "Name",
+        "role": "Role",
+        "status": "Status"
+      },
+      "currentUser": "You cannot disable your own admin account.",
+      "drawerSubtitle": "Role and worker location are fixed after creation in this version.",
+      "edit": "Edit user",
+      "saveEdit": "Save user",
+      "saveNew": "Create user",
+      "subtitle": "Review roles, locations, and account status.",
+      "title": "Users"
+    }
   },
   "app": {
     "subtitle": "Book appointments, manage availability, and keep operations accessible.",
@@ -124,9 +190,11 @@
   },
   "fields": {
     "email": "Email",
+    "locale": "Language",
     "location": "Location",
     "name": "Name",
     "password": "Password",
+    "phone": "Phone",
     "role": "Role",
     "service": "Service",
     "startDate": "Start date",
@@ -142,11 +210,17 @@
     "appointmentUpdated": "Appointment updated.",
     "availabilitySaved": "Availability saved.",
     "serviceCreated": "Service created.",
+    "serviceDisabled": "Service disabled.",
+    "serviceEnabled": "Service enabled.",
+    "serviceUpdated": "Service updated.",
     "signedIn": "Signed in.",
     "signedOut": "Signed out.",
     "timeBlocked": "Time blocked.",
     "timeBlockRemoved": "Time block removed.",
-    "userCreated": "User created."
+    "userCreated": "User created.",
+    "userDisabled": "User disabled.",
+    "userEnabled": "User enabled.",
+    "userUpdated": "User updated."
   },
   "roles": {
     "admin": "Admin",

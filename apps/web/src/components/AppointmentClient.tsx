@@ -28,6 +28,7 @@ import type { Locale } from "@/i18n/routing";
 type Role = "PATIENT" | "WORKER" | "ADMIN";
 type PatientTab = "book" | "appointments";
 type WorkerTab = "agenda" | "week" | "schedule";
+type AdminTab = "overview" | "users" | "services" | "booking";
 type AppointmentStatus = "CONFIRMED" | "CANCELED" | "COMPLETED" | "NO_SHOW";
 type WorkerAppointmentStatusAction = Extract<AppointmentStatus, "COMPLETED" | "NO_SHOW">;
 
@@ -38,6 +39,7 @@ type User = {
   name: string;
   phone: string | null;
   preferredLocale: Locale;
+  active: boolean;
   workerProfile: null | {
     id: string;
     title: string;
@@ -109,6 +111,10 @@ type Appointment = {
   };
   service: Service;
   location: string | null;
+  cancellationReason?: string | null;
+  canceledAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type AvailabilityWindow = {
@@ -150,6 +156,36 @@ type WorkerDayForm = {
   location: string;
   breakStart?: string;
   breakEnd?: string;
+};
+
+type AdminDrawer =
+  | {
+      mode: "create" | "edit";
+      type: "user";
+      userId?: string;
+    }
+  | {
+      mode: "create" | "edit";
+      type: "service";
+      serviceId?: string;
+    };
+
+type AdminUserForm = {
+  active: boolean;
+  email: string;
+  name: string;
+  phone: string;
+  preferredLocale: Locale;
+  role: Role;
+  workerLocation: string;
+};
+
+type AdminServiceForm = {
+  active: boolean;
+  descriptionEn: string;
+  descriptionFi: string;
+  nameEn: string;
+  nameFi: string;
 };
 
 type ApiErrorBody = {
@@ -504,6 +540,7 @@ function SlotGroup({
   actionLabel,
   locale,
   requestBooking,
+  readOnly = false,
   saving,
   slots,
   timeZone,
@@ -514,6 +551,7 @@ function SlotGroup({
   actionLabel: string;
   locale: Locale;
   requestBooking: (slot: Slot) => void;
+  readOnly?: boolean;
   saving: boolean;
   slots: Slot[];
   timeZone: string | undefined;
@@ -542,6 +580,10 @@ function SlotGroup({
               </span>
               {taken ? (
                 <span className="font-semibold">{t("booking.taken")}</span>
+              ) : readOnly ? (
+                <span className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1 text-sm font-semibold text-teal-800">
+                  {t("admin.booking.available")}
+                </span>
               ) : (
                 <button
                   className="btn-primary min-w-24"
@@ -690,6 +732,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [calendarMonth, setCalendarMonth] = useState(() => monthStart(bookingMinDate));
   const [activeTab, setActiveTab] = useState<PatientTab>("book");
   const [workerTab, setWorkerTab] = useState<WorkerTab>("agenda");
+  const [adminTab, setAdminTab] = useState<AdminTab>("overview");
   const [saving, setSaving] = useState(false);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -719,12 +762,27 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [blockStart, setBlockStart] = useState("12:00");
   const [blockEnd, setBlockEnd] = useState("12:30");
   const [blockReason, setBlockReason] = useState("Lunch break");
-  const [adminUserRole, setAdminUserRole] = useState<Role>("WORKER");
-  const [adminUserEmail, setAdminUserEmail] = useState("");
-  const [adminUserName, setAdminUserName] = useState("");
-  const [adminWorkerLocation, setAdminWorkerLocation] = useState("Main clinic");
-  const [serviceNameEn, setServiceNameEn] = useState("");
-  const [serviceNameFi, setServiceNameFi] = useState("");
+  const [adminUsers, setAdminUsers] = useState<User[]>([]);
+  const [adminServices, setAdminServices] = useState<Service[]>([]);
+  const [adminAppointments, setAdminAppointments] = useState<Appointment[]>([]);
+  const [adminAvailableSlotsToday, setAdminAvailableSlotsToday] = useState(0);
+  const [adminDrawer, setAdminDrawer] = useState<AdminDrawer | null>(null);
+  const [adminUserForm, setAdminUserForm] = useState<AdminUserForm>({
+    active: true,
+    email: "",
+    name: "",
+    phone: "",
+    preferredLocale: locale,
+    role: "WORKER",
+    workerLocation: "Main clinic",
+  });
+  const [adminServiceForm, setAdminServiceForm] = useState<AdminServiceForm>({
+    active: true,
+    descriptionEn: "",
+    descriptionFi: "",
+    nameEn: "",
+    nameFi: "",
+  });
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
   const bookingTabRef = useRef<HTMLButtonElement>(null);
   const appointmentsTabRef = useRef<HTMLButtonElement>(null);
@@ -743,7 +801,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     [dateStripStart],
   );
 
-  const userCanBook = user?.role === "PATIENT" || user?.role === "ADMIN";
+  const userCanBook = user?.role === "PATIENT";
   const profileInitial =
     user?.name.trim().charAt(0).toUpperCase() || user?.email.charAt(0).toUpperCase();
 
@@ -896,6 +954,37 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
         (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
       );
   }, [workerTimeOff]);
+  const adminToday = formatDateKey(new Date(), "Europe/Helsinki");
+  const adminWeekStart = weekStartMonday(adminToday);
+  const adminWeekEnd = addDays(adminWeekStart, 6);
+  const adminTodayAppointments = useMemo(
+    () =>
+      adminAppointments
+        .filter(
+          (appointment) =>
+            appointment.status === "CONFIRMED" &&
+            formatDateKey(appointment.startsAt, appointment.worker.timezone) ===
+              formatDateKey(new Date(), appointment.worker.timezone),
+        )
+        .sort(
+          (left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+        ),
+    [adminAppointments],
+  );
+  const adminCancellationsThisWeek = useMemo(
+    () =>
+      adminAppointments.filter((appointment) => {
+        if (appointment.status !== "CANCELED") return false;
+        const dateKey = formatDateKey(
+          appointment.canceledAt ?? appointment.updatedAt ?? appointment.startsAt,
+          "Europe/Helsinki",
+        );
+        return dateKey >= adminWeekStart && dateKey <= adminWeekEnd;
+      }).length,
+    [adminAppointments, adminWeekEnd, adminWeekStart],
+  );
+  const adminWorkerCount = adminUsers.filter((adminUser) => adminUser.role === "WORKER").length;
+  const adminPatientCount = adminUsers.filter((adminUser) => adminUser.role === "PATIENT").length;
 
   async function loadCatalog() {
     const [serviceData, workerData] = await Promise.all([
@@ -913,12 +1002,62 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
     setSelectedWorkerId(nextWorker?.id ?? "");
     setSelectedServiceId(nextServiceId);
+    return workerData.workers;
   }
 
-  async function refreshSession() {
+  async function loadAdminAvailableSlotsToday(workerData: Worker[]) {
+    const slotCounts = await Promise.all(
+      workerData
+        .filter((worker) => worker.active)
+        .map(async (worker) => {
+          const serviceId = worker.services.find((service) => service.active)?.id;
+          if (!serviceId) return 0;
+          const today = formatDateKey(new Date(), worker.timezone);
+          const from = inputDateStartInTimeZone(today, worker.timezone);
+          const to = inputDateStartInTimeZone(addDays(today, 1), worker.timezone);
+          const params = new URLSearchParams({
+            serviceId,
+            from: from.toISOString(),
+            to: to.toISOString(),
+            includeTaken: "true",
+          });
+
+          try {
+            const data = await apiRequest<{ slots: Slot[] }>(
+              `/workers/${worker.id}/slots?${params.toString()}`,
+            );
+            return data.slots.filter((slot) => (slot.status ?? "AVAILABLE") === "AVAILABLE").length;
+          } catch {
+            return 0;
+          }
+        }),
+    );
+
+    setAdminAvailableSlotsToday(slotCounts.reduce((total, count) => total + count, 0));
+  }
+
+  async function loadAdminData(workerData = workers) {
+    const [userData, serviceData, appointmentData] = await Promise.all([
+      apiRequest<{ users: User[] }>("/admin/users"),
+      apiRequest<{ services: Service[] }>("/admin/services"),
+      apiRequest<{ appointments: Appointment[] }>("/admin/appointments"),
+    ]);
+    setAdminUsers(userData.users);
+    setAdminServices(serviceData.services);
+    setAdminAppointments(appointmentData.appointments);
+    await loadAdminAvailableSlotsToday(workerData);
+  }
+
+  async function refreshSession(catalogWorkers = workers) {
     const data = await apiRequest<{ user: User | null }>("/auth/me");
     setUser(data.user);
     if (data.user) {
+      if (data.user.role === "ADMIN") {
+        setAppointments([]);
+        setWorkerTimeOff([]);
+        await loadAdminData(catalogWorkers);
+        return;
+      }
       const appointmentData = await apiRequest<{ appointments: Appointment[] }>("/appointments");
       setAppointments(appointmentData.appointments);
       if (data.user.role === "WORKER") {
@@ -930,6 +1069,11 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       setAppointments([]);
       setReschedulingAppointment(null);
       setWorkerTimeOff([]);
+      setAdminUsers([]);
+      setAdminServices([]);
+      setAdminAppointments([]);
+      setAdminAvailableSlotsToday(0);
+      setAdminDrawer(null);
     }
   }
 
@@ -1014,8 +1158,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   useEffect(() => {
     void run(async () => {
-      await loadCatalog();
-      await refreshSession();
+      const catalogWorkers = await loadCatalog();
+      await refreshSession(catalogWorkers);
     });
   }, []);
 
@@ -1066,18 +1210,19 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }, [authDialogOpen, authMode]);
 
   useEffect(() => {
-    if (!authDialogOpen && !profileMenuOpen && !pendingConfirmation) return;
+    if (!authDialogOpen && !profileMenuOpen && !pendingConfirmation && !adminDrawer) return;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (pendingConfirmation) closeConfirmationDialog();
       if (authDialogOpen) closeAuthDialog();
+      if (adminDrawer) closeAdminDrawer();
       setProfileMenuOpen(false);
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [authDialogOpen, pendingConfirmation, profileMenuOpen, saving]);
+  }, [adminDrawer, authDialogOpen, pendingConfirmation, profileMenuOpen, saving]);
 
   useEffect(() => {
     if (activeTab !== "appointments" || !focusAppointmentId) return;
@@ -1525,46 +1670,190 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     }, t("notices.timeBlockRemoved"));
   }
 
-  async function createAdminUser(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await run(async () => {
-      await apiRequest("/admin/users", {
-        method: "POST",
-        body: JSON.stringify({
-          email: adminUserEmail,
-          name: adminUserName,
-          role: adminUserRole,
-          password: "ChangeMe123!",
-          preferredLocale: locale,
-          worker:
-            adminUserRole === "WORKER"
-              ? {
-                  location: adminWorkerLocation,
-                }
-              : undefined,
-        }),
-      });
-      setAdminUserEmail("");
-      setAdminUserName("");
-      setAdminWorkerLocation("Main clinic");
-    }, t("notices.userCreated"));
+  function updateAdminUserForm(patch: Partial<AdminUserForm>) {
+    setAdminUserForm((current) => ({ ...current, ...patch }));
   }
 
-  async function createService(event: React.FormEvent<HTMLFormElement>) {
+  function updateAdminServiceForm(patch: Partial<AdminServiceForm>) {
+    setAdminServiceForm((current) => ({ ...current, ...patch }));
+  }
+
+  function openCreateAdminUserDrawer() {
+    setAdminUserForm({
+      active: true,
+      email: "",
+      name: "",
+      phone: "",
+      preferredLocale: locale,
+      role: "WORKER",
+      workerLocation: "Main clinic",
+    });
+    setAdminDrawer({ mode: "create", type: "user" });
+    setError(null);
+    setNotice(null);
+  }
+
+  function openEditAdminUserDrawer(adminUser: User) {
+    setAdminUserForm({
+      active: adminUser.active,
+      email: adminUser.email,
+      name: adminUser.name,
+      phone: adminUser.phone ?? "",
+      preferredLocale: adminUser.preferredLocale,
+      role: adminUser.role,
+      workerLocation: adminUser.workerProfile?.location ?? "",
+    });
+    setAdminDrawer({ mode: "edit", type: "user", userId: adminUser.id });
+    setError(null);
+    setNotice(null);
+  }
+
+  function openCreateServiceDrawer() {
+    setAdminServiceForm({
+      active: true,
+      descriptionEn: "",
+      descriptionFi: "",
+      nameEn: "",
+      nameFi: "",
+    });
+    setAdminDrawer({ mode: "create", type: "service" });
+    setError(null);
+    setNotice(null);
+  }
+
+  function openEditServiceDrawer(service: Service) {
+    setAdminServiceForm({
+      active: service.active,
+      descriptionEn: service.description.en ?? "",
+      descriptionFi: service.description.fi ?? "",
+      nameEn: service.name.en ?? "",
+      nameFi: service.name.fi ?? "",
+    });
+    setAdminDrawer({ mode: "edit", type: "service", serviceId: service.id });
+    setError(null);
+    setNotice(null);
+  }
+
+  function closeAdminDrawer() {
+    if (saving) return;
+    setAdminDrawer(null);
+  }
+
+  async function submitAdminUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await run(async () => {
-      await apiRequest("/admin/services", {
-        method: "POST",
-        body: JSON.stringify({
-          nameEn: serviceNameEn,
-          nameFi: serviceNameFi,
-          active: true,
-        }),
-      });
-      setServiceNameEn("");
-      setServiceNameFi("");
-      await loadCatalog();
-    }, t("notices.serviceCreated"));
+    await run(
+      async () => {
+        if (adminDrawer?.type === "user" && adminDrawer.mode === "edit" && adminDrawer.userId) {
+          await apiRequest(`/admin/users/${adminDrawer.userId}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              active: adminUserForm.active,
+              name: adminUserForm.name,
+              phone: adminUserForm.phone.trim() ? adminUserForm.phone.trim() : null,
+              preferredLocale: adminUserForm.preferredLocale,
+            }),
+          });
+          const catalogWorkers = await loadCatalog();
+          await loadAdminData(catalogWorkers);
+          setAdminDrawer(null);
+          return;
+        }
+
+        await apiRequest("/admin/users", {
+          method: "POST",
+          body: JSON.stringify({
+            email: adminUserForm.email,
+            name: adminUserForm.name,
+            role: adminUserForm.role,
+            password: "ChangeMe123!",
+            phone: adminUserForm.phone.trim() || undefined,
+            preferredLocale: adminUserForm.preferredLocale,
+            worker:
+              adminUserForm.role === "WORKER"
+                ? {
+                    location: adminUserForm.workerLocation,
+                  }
+                : undefined,
+          }),
+        });
+        const catalogWorkers = await loadCatalog();
+        await loadAdminData(catalogWorkers);
+        setAdminDrawer(null);
+      },
+      adminDrawer?.mode === "edit" ? t("notices.userUpdated") : t("notices.userCreated"),
+    );
+  }
+
+  async function updateAdminUserActive(adminUser: User, active: boolean) {
+    await run(
+      async () => {
+        await apiRequest(`/admin/users/${adminUser.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ active }),
+        });
+        const catalogWorkers = await loadCatalog();
+        await loadAdminData(catalogWorkers);
+      },
+      active ? t("notices.userEnabled") : t("notices.userDisabled"),
+    );
+  }
+
+  async function submitAdminService(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await run(
+      async () => {
+        const body = JSON.stringify({
+          active: adminServiceForm.active,
+          descriptionEn: adminServiceForm.descriptionEn.trim()
+            ? adminServiceForm.descriptionEn.trim()
+            : null,
+          descriptionFi: adminServiceForm.descriptionFi.trim()
+            ? adminServiceForm.descriptionFi.trim()
+            : null,
+          nameEn: adminServiceForm.nameEn,
+          nameFi: adminServiceForm.nameFi,
+        });
+
+        if (
+          adminDrawer?.type === "service" &&
+          adminDrawer.mode === "edit" &&
+          adminDrawer.serviceId
+        ) {
+          await apiRequest(`/admin/services/${adminDrawer.serviceId}`, {
+            method: "PATCH",
+            body,
+          });
+        } else {
+          await apiRequest("/admin/services", {
+            method: "POST",
+            body,
+          });
+        }
+
+        const catalogWorkers = await loadCatalog();
+        await loadAdminData(catalogWorkers);
+        setAdminDrawer(null);
+      },
+      adminDrawer?.mode === "edit" ? t("notices.serviceUpdated") : t("notices.serviceCreated"),
+    );
+  }
+
+  async function updateAdminServiceActive(service: Service, active: boolean) {
+    await run(
+      async () => {
+        await apiRequest(`/admin/services/${service.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            active,
+            nameEn: service.name.en ?? service.id,
+            nameFi: service.name.fi ?? service.name.en ?? service.id,
+          }),
+        });
+        const catalogWorkers = await loadCatalog();
+        await loadAdminData(catalogWorkers);
+      },
+      active ? t("notices.serviceEnabled") : t("notices.serviceDisabled"),
+    );
   }
 
   function renderAppointmentCard(appointment: Appointment, history = false) {
@@ -1820,6 +2109,197 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       ),
     );
     setWorkerLocation(nextLocation);
+  }
+
+  function renderBookingPanel({
+    id,
+    labelledBy,
+    readOnly = false,
+    subtitle = t("booking.subtitle"),
+    title = t("booking.title"),
+  }: {
+    id: string;
+    labelledBy: string;
+    readOnly?: boolean;
+    subtitle?: string;
+    title?: string;
+  }) {
+    return (
+      <div aria-labelledby={labelledBy} className="p-5" id={id} role="tabpanel">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <CalendarClock aria-hidden="true" size={22} />
+              {title}
+            </h2>
+            <p className="muted text-sm">{subtitle}</p>
+          </div>
+          <button className="btn-secondary" onClick={loadSlots} disabled={saving} type="button">
+            {t("booking.refreshSlots")}
+          </button>
+        </div>
+
+        {!readOnly && reschedulingAppointment ? (
+          <div className="mt-5 flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-bold">{t("booking.rescheduling")}</p>
+              <p className="text-sm">
+                {appointmentFormatter(reschedulingAppointment)} ·{" "}
+                {appointmentLocation(reschedulingAppointment)}
+              </p>
+            </div>
+            <button className="btn-secondary" onClick={cancelReschedule} type="button">
+              {t("booking.cancelReschedule")}
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
+          <label className="field min-w-0">
+            <span>{t("fields.worker")}</span>
+            <select
+              disabled={!readOnly && Boolean(reschedulingAppointment)}
+              value={selectedWorkerId}
+              onChange={(event) => {
+                const worker = workers.find((item) => item.id === event.target.value);
+                setSelectedWorkerId(event.target.value);
+                setSelectedServiceId(defaultServiceIdForWorker(worker, services));
+              }}
+            >
+              {workers.map((worker) => (
+                <option key={worker.id} value={worker.id}>
+                  {worker.name} · {worker.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field min-w-0">
+            <span>{t("fields.service")}</span>
+            <select
+              disabled={
+                !selectableServices.length || (!readOnly && Boolean(reschedulingAppointment))
+              }
+              value={selectedServiceId}
+              onChange={(event) => setSelectedServiceId(event.target.value)}
+            >
+              {selectableServices.map((service) => (
+                <option key={service.id} value={service.id}>
+                  {serviceName(service, locale)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-5 min-w-0">
+          <p className="muted text-sm font-semibold">{t("booking.selectDate")}</p>
+          <div
+            aria-label={t("booking.selectDate")}
+            className="mt-3 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-2"
+            tabIndex={0}
+          >
+            {dateStripDays.map((date) => {
+              const counts = slotCountsByDate.get(date) ?? { available: 0, total: 0 };
+              const selected = selectedDate === date;
+              const unavailable = counts.total === 0;
+              const limited = counts.available > 0 && counts.available <= 2;
+              const full = counts.available >= 3;
+              const weekend = isWeekend(date);
+              const disabled = unavailable;
+              return (
+                <button
+                  aria-label={fullDateLabel(date, locale)}
+                  aria-pressed={selected}
+                  className={[
+                    "grid min-h-24 w-[5.25rem] shrink-0 gap-1 rounded-md border p-2 text-center transition sm:w-24 sm:p-3",
+                    selected
+                      ? "border-teal-700 bg-teal-50 text-teal-950"
+                      : "border-[var(--line)] bg-white text-[var(--foreground)]",
+                    disabled || weekend ? "opacity-50" : "",
+                  ].join(" ")}
+                  data-testid={`strip-date-${date}`}
+                  disabled={disabled}
+                  key={date}
+                  onClick={() => selectStripDate(date)}
+                  type="button"
+                >
+                  <span className="text-xs font-bold uppercase">{weekdayLabel(date, locale)}</span>
+                  <span className="text-2xl font-bold">{dayNumber(date)}</span>
+                  <span
+                    aria-label={
+                      full
+                        ? t("booking.availabilityFull")
+                        : limited
+                          ? t("booking.availabilityLimited")
+                          : t("booking.availabilityUnavailable")
+                    }
+                    className={[
+                      "mx-auto h-2.5 w-2.5 rounded-full",
+                      full ? "bg-teal-600" : limited ? "bg-amber-500" : "bg-slate-400",
+                    ].join(" ")}
+                  />
+                  {limited ? (
+                    <span className="text-xs font-semibold text-amber-800">
+                      {t("booking.left", { count: counts.available })}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
+          <DatePickerCalendar
+            bookingMaxDate={bookingMaxDate}
+            bookingMinDate={bookingMinDate}
+            calendarMonth={calendarMonth}
+            locale={locale}
+            selectCalendarDate={selectCalendarDate}
+            selectedDate={selectedDate}
+            setCalendarMonth={setCalendarMonth}
+            slotCountsByDate={slotCountsByDate}
+          />
+
+          <div className="grid min-w-0 gap-5">
+            {slotsForSelectedDate.length ? (
+              <>
+                {morningSlots.length ? (
+                  <SlotGroup
+                    actionLabel={slotActionLabel}
+                    locale={locale}
+                    readOnly={readOnly}
+                    requestBooking={requestBooking}
+                    saving={saving}
+                    slots={morningSlots}
+                    timeZone={selectedWorker?.timezone}
+                    title={t("booking.morning")}
+                    user={user}
+                    userCanBook={slotUserCanBook}
+                  />
+                ) : null}
+                {afternoonSlots.length ? (
+                  <SlotGroup
+                    actionLabel={slotActionLabel}
+                    locale={locale}
+                    readOnly={readOnly}
+                    requestBooking={requestBooking}
+                    saving={saving}
+                    slots={afternoonSlots}
+                    timeZone={selectedWorker?.timezone}
+                    title={t("booking.afternoon")}
+                    user={user}
+                    userCanBook={slotUserCanBook}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <p className="muted text-sm">{t("booking.noSlotsForDate")}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function renderWorkerWorkspace() {
@@ -2254,6 +2734,564 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     );
   }
 
+  function adminUserIsActive(adminUser: User) {
+    return adminUser.active && (adminUser.workerProfile?.active ?? true);
+  }
+
+  function adminUserLocation(adminUser: User) {
+    if (adminUser.role === "ADMIN") return t("admin.users.allClinics");
+    if (adminUser.role === "WORKER") return adminUser.workerProfile?.location ?? t("admin.empty");
+    return t("admin.empty");
+  }
+
+  function adminUserInitials(adminUser: User) {
+    const words = adminUser.name.trim().split(/\s+/).filter(Boolean);
+    const initials = words
+      .slice(0, 2)
+      .map((word) => word.charAt(0).toUpperCase())
+      .join("");
+    return initials || adminUser.email.charAt(0).toUpperCase();
+  }
+
+  function renderAdminStatusChip(active: boolean) {
+    return (
+      <span
+        className={[
+          "inline-flex w-fit rounded-md border px-3 py-1 text-sm font-semibold",
+          active
+            ? "border-teal-200 bg-teal-50 text-teal-800"
+            : "border-red-200 bg-red-50 text-red-800",
+        ].join(" ")}
+      >
+        {active ? t("admin.status.active") : t("admin.status.inactive")}
+      </span>
+    );
+  }
+
+  function adminServiceMetadata(service: Service) {
+    const serviceWorkers = workers.filter((worker) =>
+      worker.services.some((workerService) => workerService.id === service.id),
+    );
+    const durations = Array.from(
+      new Set(serviceWorkers.map((worker) => worker.appointmentDurationMinutes)),
+    ).sort((left, right) => left - right);
+    const locations = Array.from(new Set(serviceWorkers.map((worker) => worker.location))).sort();
+
+    return {
+      durations:
+        durations.length > 0
+          ? durations
+              .map((duration) => t("admin.services.duration", { count: duration }))
+              .join(", ")
+          : t("admin.services.noWorkers"),
+      locations: locations.length > 0 ? locations.join(", ") : t("admin.services.noLocations"),
+    };
+  }
+
+  function renderAdminOverview() {
+    const activeWorkerCount = workers.filter((worker) => worker.active).length;
+    const cards = [
+      {
+        label: t("admin.overview.appointmentsToday"),
+        value: adminTodayAppointments.length,
+        detail: fullDateLabel(adminToday, locale),
+      },
+      {
+        label: t("admin.overview.availableSlotsToday"),
+        value: adminAvailableSlotsToday,
+        detail: t("admin.overview.acrossWorkers", { count: activeWorkerCount }),
+      },
+      {
+        label: t("admin.overview.totalUsers"),
+        value: adminUsers.length,
+        detail: t("admin.overview.userBreakdown", {
+          patients: adminPatientCount,
+          workers: adminWorkerCount,
+        }),
+      },
+      {
+        label: t("admin.overview.cancellationsThisWeek"),
+        value: adminCancellationsThisWeek,
+        detail: t("admin.overview.thisWeek"),
+      },
+    ];
+
+    return (
+      <div
+        aria-labelledby="admin-overview-tab"
+        className="grid gap-5 p-5"
+        id="admin-overview-panel"
+        role="tabpanel"
+      >
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {cards.map((card) => (
+            <section
+              className="rounded-md border border-[var(--line)] bg-white p-4"
+              key={card.label}
+            >
+              <p className="muted text-sm font-semibold">{card.label}</p>
+              <p className="mt-2 text-4xl font-bold">{card.value}</p>
+              <p className="muted mt-2 text-sm">{card.detail}</p>
+            </section>
+          ))}
+        </div>
+
+        <section className="surface min-w-0 overflow-hidden">
+          <div className="flex flex-col gap-2 border-b border-[var(--line)] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-bold">
+              {t("admin.overview.todaySchedule", { date: fullDateLabel(adminToday, locale) })}
+            </h2>
+            <p className="muted text-sm">{t("admin.overview.allWorkers")}</p>
+          </div>
+          <div className="divide-y divide-[var(--line)]">
+            {adminTodayAppointments.length ? (
+              adminTodayAppointments.map((appointment) => (
+                <div
+                  className="grid gap-3 p-4 md:grid-cols-[7rem_minmax(0,1fr)_auto] md:items-center"
+                  key={appointment.id}
+                >
+                  <p className="muted font-semibold">
+                    {formatTime(appointment.startsAt, locale, appointment.worker.timezone)}
+                  </p>
+                  <div className="min-w-0">
+                    <p className="break-words font-bold">
+                      {appointment.patient.name} · {appointment.worker.name}
+                    </p>
+                    <p className="muted break-words text-sm">
+                      {serviceName(appointment.service, locale)} ·{" "}
+                      {appointmentLocation(appointment)}
+                    </p>
+                  </div>
+                  <span
+                    className={[
+                      "inline-flex w-fit rounded-md border px-3 py-1 text-sm font-semibold",
+                      appointmentStatusClass(appointment.status),
+                    ].join(" ")}
+                  >
+                    {appointmentStatusLabel(appointment.status)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="muted p-4 text-sm">{t("admin.overview.noAppointments")}</p>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderAdminUsers() {
+    return (
+      <div
+        aria-labelledby="admin-users-tab"
+        className="grid gap-5 p-5"
+        id="admin-users-panel"
+        role="tabpanel"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">{t("admin.users.title")}</h2>
+            <p className="muted text-sm">{t("admin.users.subtitle")}</p>
+          </div>
+          <button
+            className="btn-primary flex items-center justify-center gap-2"
+            onClick={openCreateAdminUserDrawer}
+            type="button"
+          >
+            <UserPlus aria-hidden="true" size={18} />
+            {t("admin.users.add")}
+          </button>
+        </div>
+
+        <div className="surface overflow-x-auto">
+          <table className="w-full min-w-[56rem] border-collapse text-left">
+            <thead className="border-b border-[var(--line)] text-sm uppercase text-[var(--muted)]">
+              <tr>
+                <th className="px-4 py-3 font-bold">{t("admin.users.columns.name")}</th>
+                <th className="px-4 py-3 font-bold">{t("admin.users.columns.email")}</th>
+                <th className="px-4 py-3 font-bold">{t("admin.users.columns.role")}</th>
+                <th className="px-4 py-3 font-bold">{t("admin.users.columns.location")}</th>
+                <th className="px-4 py-3 font-bold">{t("admin.users.columns.status")}</th>
+                <th className="px-4 py-3 text-right font-bold">
+                  {t("admin.users.columns.actions")}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--line)]">
+              {adminUsers.map((adminUser) => {
+                const active = adminUserIsActive(adminUser);
+                const isCurrentUser = adminUser.id === user?.id;
+                return (
+                  <tr data-testid={`admin-user-row-${adminUser.id}`} key={adminUser.id}>
+                    <td className="px-4 py-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-teal-50 font-bold text-teal-800">
+                          {adminUserInitials(adminUser)}
+                        </span>
+                        <span className="min-w-0 break-words font-bold">{adminUser.name}</span>
+                      </div>
+                    </td>
+                    <td className="muted px-4 py-4">{adminUser.email}</td>
+                    <td className="px-4 py-4">
+                      <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-semibold">
+                        {roleLabel(adminUser.role, t)}
+                      </span>
+                    </td>
+                    <td className="muted px-4 py-4">{adminUserLocation(adminUser)}</td>
+                    <td className="px-4 py-4">{renderAdminStatusChip(active)}</td>
+                    <td className="px-4 py-4">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          className="btn-secondary"
+                          onClick={() => openEditAdminUserDrawer(adminUser)}
+                          type="button"
+                        >
+                          {t("admin.actions.edit")}
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          disabled={saving || isCurrentUser}
+                          onClick={() => updateAdminUserActive(adminUser, !active)}
+                          title={isCurrentUser ? t("admin.users.currentUser") : undefined}
+                          type="button"
+                        >
+                          {active ? t("admin.actions.disable") : t("admin.actions.enable")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAdminServices() {
+    return (
+      <div
+        aria-labelledby="admin-services-tab"
+        className="grid gap-5 p-5"
+        id="admin-services-panel"
+        role="tabpanel"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">{t("admin.services.title")}</h2>
+            <p className="muted text-sm">{t("admin.services.subtitle")}</p>
+          </div>
+          <button
+            className="btn-primary flex items-center justify-center gap-2"
+            onClick={openCreateServiceDrawer}
+            type="button"
+          >
+            <Plus aria-hidden="true" size={18} />
+            {t("admin.services.add")}
+          </button>
+        </div>
+
+        <div className="surface divide-y divide-[var(--line)] overflow-hidden">
+          {adminServices.length ? (
+            adminServices.map((service) => {
+              const metadata = adminServiceMetadata(service);
+              return (
+                <article
+                  className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center"
+                  data-testid={`admin-service-row-${service.id}`}
+                  key={service.id}
+                >
+                  <div className="min-w-0">
+                    <h3 className="break-words text-lg font-bold">
+                      {serviceName(service, locale)}
+                    </h3>
+                    <p className="muted mt-1 break-words text-sm">
+                      {metadata.durations} · {metadata.locations}
+                    </p>
+                  </div>
+                  {renderAdminStatusChip(service.active)}
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    <button
+                      className="btn-secondary"
+                      onClick={() => openEditServiceDrawer(service)}
+                      type="button"
+                    >
+                      {t("admin.actions.edit")}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      disabled={saving}
+                      onClick={() => updateAdminServiceActive(service, !service.active)}
+                      type="button"
+                    >
+                      {service.active ? t("admin.actions.disable") : t("admin.actions.enable")}
+                    </button>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <p className="muted p-4 text-sm">{t("admin.services.empty")}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderAdminWorkspace() {
+    const tabs = [
+      ["overview", Shield, t("admin.tabs.overview"), null],
+      ["users", UserPlus, t("admin.tabs.users"), adminUsers.length],
+      ["services", Settings, t("admin.tabs.services"), null],
+      ["booking", CalendarClock, t("admin.tabs.booking"), null],
+    ] as const;
+
+    return (
+      <section className="surface min-w-0 overflow-hidden">
+        <div
+          aria-label={t("admin.tabsLabel")}
+          className="grid border-b border-[var(--line)] sm:grid-cols-4"
+          role="tablist"
+        >
+          {tabs.map(([tab, Icon, label, badge]) => (
+            <button
+              aria-controls={`admin-${tab}-panel`}
+              aria-selected={adminTab === tab}
+              className={[
+                "flex min-h-14 items-center justify-center gap-2 border-b border-[var(--line)] px-4 py-3 text-center font-bold transition sm:border-b-0 sm:border-r last:sm:border-r-0",
+                adminTab === tab
+                  ? "bg-teal-50 text-teal-950"
+                  : "bg-white text-[var(--foreground)] hover:bg-slate-50",
+              ].join(" ")}
+              id={`admin-${tab}-tab`}
+              key={tab}
+              onClick={() => setAdminTab(tab)}
+              role="tab"
+              tabIndex={adminTab === tab ? 0 : -1}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={18} />
+              {label}
+              {badge !== null ? (
+                <span className="inline-flex min-w-7 justify-center rounded-full bg-teal-100 px-2 py-0.5 text-sm font-bold text-teal-900">
+                  {badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        {adminTab === "overview" ? renderAdminOverview() : null}
+        {adminTab === "users" ? renderAdminUsers() : null}
+        {adminTab === "services" ? renderAdminServices() : null}
+        {adminTab === "booking"
+          ? renderBookingPanel({
+              id: "admin-booking-panel",
+              labelledBy: "admin-booking-tab",
+              readOnly: true,
+              subtitle: t("admin.booking.subtitle"),
+              title: t("admin.booking.title"),
+            })
+          : null}
+      </section>
+    );
+  }
+
+  function renderAdminDrawer() {
+    if (!adminDrawer) return null;
+
+    const editingUser =
+      adminDrawer.type === "user" && adminDrawer.mode === "edit"
+        ? adminUsers.find((adminUser) => adminUser.id === adminDrawer.userId)
+        : null;
+    const editingCurrentUser = Boolean(editingUser && editingUser.id === user?.id);
+    const title =
+      adminDrawer.type === "user"
+        ? adminDrawer.mode === "edit"
+          ? t("admin.users.edit")
+          : t("admin.users.add")
+        : adminDrawer.mode === "edit"
+          ? t("admin.services.edit")
+          : t("admin.services.add");
+
+    return (
+      <div className="fixed inset-0 z-30 bg-slate-950/40">
+        <section
+          aria-labelledby="admin-drawer-title"
+          aria-modal="true"
+          className="surface ml-auto flex h-full w-full max-w-xl flex-col overflow-hidden rounded-none border-y-0 border-r-0 shadow-xl"
+          role="dialog"
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] p-5">
+            <div>
+              <h2 className="text-xl font-bold" id="admin-drawer-title">
+                {title}
+              </h2>
+              <p className="muted mt-1 text-sm">
+                {adminDrawer.type === "user"
+                  ? t("admin.users.drawerSubtitle")
+                  : t("admin.services.drawerSubtitle")}
+              </p>
+            </div>
+            <button
+              aria-label={t("admin.drawer.close")}
+              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+              disabled={saving}
+              onClick={closeAdminDrawer}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+
+          {adminDrawer.type === "user" ? (
+            <form
+              className="grid flex-1 content-start gap-4 overflow-auto p-5"
+              onSubmit={submitAdminUser}
+            >
+              <label className="field">
+                <span>{t("fields.name")}</span>
+                <input
+                  onChange={(event) => updateAdminUserForm({ name: event.target.value })}
+                  required
+                  value={adminUserForm.name}
+                />
+              </label>
+              <label className="field">
+                <span>{t("fields.email")}</span>
+                <input
+                  disabled={adminDrawer.mode === "edit"}
+                  onChange={(event) => updateAdminUserForm({ email: event.target.value })}
+                  required
+                  type="email"
+                  value={adminUserForm.email}
+                />
+              </label>
+              <label className="field">
+                <span>{t("fields.phone")}</span>
+                <input
+                  onChange={(event) => updateAdminUserForm({ phone: event.target.value })}
+                  value={adminUserForm.phone}
+                />
+              </label>
+              <label className="field">
+                <span>{t("fields.role")}</span>
+                <select
+                  disabled={adminDrawer.mode === "edit"}
+                  onChange={(event) => updateAdminUserForm({ role: event.target.value as Role })}
+                  value={adminUserForm.role}
+                >
+                  <option value="PATIENT">{t("roles.patient")}</option>
+                  <option value="WORKER">{t("roles.worker")}</option>
+                  <option value="ADMIN">{t("roles.admin")}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{t("fields.locale")}</span>
+                <select
+                  onChange={(event) =>
+                    updateAdminUserForm({ preferredLocale: event.target.value as Locale })
+                  }
+                  value={adminUserForm.preferredLocale}
+                >
+                  <option value="en">English</option>
+                  <option value="fi">Suomi</option>
+                </select>
+              </label>
+              {adminUserForm.role === "WORKER" ? (
+                <label className="field">
+                  <span>{t("fields.location")}</span>
+                  <input
+                    disabled={adminDrawer.mode === "edit"}
+                    onChange={(event) =>
+                      updateAdminUserForm({ workerLocation: event.target.value })
+                    }
+                    required={adminDrawer.mode === "create"}
+                    value={adminUserForm.workerLocation}
+                  />
+                </label>
+              ) : null}
+              {adminDrawer.mode === "edit" ? (
+                <label className="flex items-center gap-2 font-semibold">
+                  <input
+                    checked={adminUserForm.active}
+                    disabled={editingCurrentUser}
+                    onChange={(event) => updateAdminUserForm({ active: event.target.checked })}
+                    type="checkbox"
+                  />
+                  {t("admin.status.active")}
+                </label>
+              ) : null}
+              {editingCurrentUser ? (
+                <p className="muted text-sm">{t("admin.users.currentUser")}</p>
+              ) : null}
+              <button className="btn-primary" disabled={saving} type="submit">
+                {adminDrawer.mode === "edit" ? t("admin.users.saveEdit") : t("admin.users.saveNew")}
+              </button>
+            </form>
+          ) : (
+            <form
+              className="grid flex-1 content-start gap-4 overflow-auto p-5"
+              onSubmit={submitAdminService}
+            >
+              <label className="field">
+                <span>{t("admin.serviceNameEn")}</span>
+                <input
+                  onChange={(event) => updateAdminServiceForm({ nameEn: event.target.value })}
+                  required
+                  value={adminServiceForm.nameEn}
+                />
+              </label>
+              <label className="field">
+                <span>{t("admin.serviceNameFi")}</span>
+                <input
+                  onChange={(event) => updateAdminServiceForm({ nameFi: event.target.value })}
+                  required
+                  value={adminServiceForm.nameFi}
+                />
+              </label>
+              <label className="field">
+                <span>{t("admin.services.descriptionEn")}</span>
+                <textarea
+                  onChange={(event) =>
+                    updateAdminServiceForm({ descriptionEn: event.target.value })
+                  }
+                  rows={3}
+                  value={adminServiceForm.descriptionEn}
+                />
+              </label>
+              <label className="field">
+                <span>{t("admin.services.descriptionFi")}</span>
+                <textarea
+                  onChange={(event) =>
+                    updateAdminServiceForm({ descriptionFi: event.target.value })
+                  }
+                  rows={3}
+                  value={adminServiceForm.descriptionFi}
+                />
+              </label>
+              <label className="flex items-center gap-2 font-semibold">
+                <input
+                  checked={adminServiceForm.active}
+                  onChange={(event) => updateAdminServiceForm({ active: event.target.checked })}
+                  type="checkbox"
+                />
+                {t("admin.status.active")}
+              </label>
+              <button className="btn-primary" disabled={saving} type="submit">
+                {adminDrawer.mode === "edit"
+                  ? t("admin.services.saveEdit")
+                  : t("admin.services.saveNew")}
+              </button>
+            </form>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   function renderConfirmationDialog() {
     if (!pendingConfirmation) return null;
 
@@ -2513,6 +3551,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
               {user?.role === "WORKER" ? (
                 renderWorkerWorkspace()
+              ) : user?.role === "ADMIN" ? (
+                renderAdminWorkspace()
               ) : (
                 <section className="surface min-w-0 overflow-hidden">
                   <div
@@ -2802,94 +3842,13 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                   )}
                 </section>
               )}
-
-              {user?.role === "ADMIN" ? (
-                <section className="surface p-5">
-                  <h2 className="flex items-center gap-2 text-xl font-bold">
-                    <Shield aria-hidden="true" size={22} />
-                    {t("admin.title")}
-                  </h2>
-                  <div className="mt-4 grid gap-5 lg:grid-cols-2">
-                    <form className="grid gap-4" onSubmit={createAdminUser}>
-                      <h3 className="font-bold">{t("admin.createUser")}</h3>
-                      <label className="field">
-                        <span>{t("fields.name")}</span>
-                        <input
-                          value={adminUserName}
-                          onChange={(event) => setAdminUserName(event.target.value)}
-                          required
-                        />
-                      </label>
-                      <label className="field">
-                        <span>{t("fields.email")}</span>
-                        <input
-                          type="email"
-                          value={adminUserEmail}
-                          onChange={(event) => setAdminUserEmail(event.target.value)}
-                          required
-                        />
-                      </label>
-                      <label className="field">
-                        <span>{t("fields.role")}</span>
-                        <select
-                          value={adminUserRole}
-                          onChange={(event) => setAdminUserRole(event.target.value as Role)}
-                        >
-                          <option value="PATIENT">{t("roles.patient")}</option>
-                          <option value="WORKER">{t("roles.worker")}</option>
-                          <option value="ADMIN">{t("roles.admin")}</option>
-                        </select>
-                      </label>
-                      {adminUserRole === "WORKER" ? (
-                        <label className="field">
-                          <span>{t("fields.location")}</span>
-                          <input
-                            value={adminWorkerLocation}
-                            onChange={(event) => setAdminWorkerLocation(event.target.value)}
-                            required
-                          />
-                        </label>
-                      ) : null}
-                      <button
-                        className="btn-primary flex items-center justify-center gap-2"
-                        type="submit"
-                      >
-                        <UserPlus aria-hidden="true" size={18} />
-                        {t("admin.saveUser")}
-                      </button>
-                    </form>
-
-                    <form className="grid gap-4" onSubmit={createService}>
-                      <h3 className="font-bold">{t("admin.createService")}</h3>
-                      <label className="field">
-                        <span>{t("admin.serviceNameEn")}</span>
-                        <input
-                          value={serviceNameEn}
-                          onChange={(event) => setServiceNameEn(event.target.value)}
-                          required
-                        />
-                      </label>
-                      <label className="field">
-                        <span>{t("admin.serviceNameFi")}</span>
-                        <input
-                          value={serviceNameFi}
-                          onChange={(event) => setServiceNameFi(event.target.value)}
-                          required
-                        />
-                      </label>
-                      <button className="btn-primary" type="submit">
-                        {t("admin.saveService")}
-                      </button>
-                    </form>
-                  </div>
-                </section>
-              ) : null}
             </>
           ) : null}
         </div>
       </div>
 
       {renderConfirmationDialog()}
+      {renderAdminDrawer()}
 
       {bookingDialogOpen ? (
         <div className="fixed inset-0 z-30 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6">
