@@ -2297,6 +2297,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     const destructive = isCancel || pendingConfirmation.type === "deleteTimeOff" || isNoShow;
     const showCancellationPolicy =
       isCancel &&
+      user?.role === "PATIENT" &&
       appointment !== null &&
       appointmentStartsWithinHours(appointment, cancellationPolicyWarningHours);
 

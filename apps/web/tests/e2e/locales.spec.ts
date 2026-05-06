@@ -914,6 +914,7 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   await futureCard.getByRole("button", { name: "Cancel" }).click();
   const workerCancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
   await expect(workerCancelDialog).toContainText("Liisa Järvinen");
+  await expect(workerCancelDialog).not.toContainText("less than 24 hours");
   expect(cancelRequest).toBeNull();
   await workerCancelDialog.getByRole("button", { name: "Cancel appointment" }).click();
   await expect.poll(() => cancelRequest?.reason).toBe("Canceled by user");
