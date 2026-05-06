@@ -2,6 +2,12 @@
 
 Accessible appointment booking for patients, healthcare workers, and admins.
 
+## Screenshots
+
+![Public booking view](docs/screenshots/public-booking.png)
+
+![Worker agenda view](docs/screenshots/worker-agenda.png)
+
 ## Stack
 
 - `apps/web`: Next.js, React, TypeScript, Tailwind, `next-intl`
