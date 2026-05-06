@@ -184,6 +184,88 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await expect(page.getByTestId("appointment-card-appointment-one")).toContainText("Canceled");
 });
 
+test("patient cancellation confirmation blocks appointments inside the cutoff", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-general",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Main clinic",
+    name: "Dr. Aino Lehto",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const patient = {
+    email: "patient@example.com",
+    id: "patient-user",
+    name: "Patient User",
+    phone: null,
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  const appointment = {
+    endsAt: "2026-05-04T09:30:00.000Z",
+    id: "appointment-cutoff",
+    location: "East clinic",
+    patient,
+    service,
+    startsAt: "2026-05-04T09:00:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
+  let cancelRequestSent = false;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: patient } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: [appointment] } });
+  });
+  await page.route(
+    "http://localhost:4000/appointments/appointment-cutoff/cancel",
+    async (route) => {
+      cancelRequestSent = true;
+      await route.fulfill({ status: 400, json: { error: { code: "CANCELLATION_WINDOW_CLOSED" } } });
+    },
+  );
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+  await page.getByRole("tab", { name: /My appointments/ }).click();
+  await page
+    .getByTestId("appointment-card-appointment-cutoff")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+
+  const cancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
+  await expect(cancelDialog).toContainText("This appointment can no longer be canceled.");
+  await expect(cancelDialog.getByRole("button", { name: "Cancel appointment" })).toHaveCount(0);
+  expect(cancelRequestSent).toBe(false);
+
+  await cancelDialog.getByRole("button", { name: "Keep appointment" }).click();
+  await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
+  expect(cancelRequestSent).toBe(false);
+});
+
 test("calendar selection recenters the 14-day date strip", async ({ page }) => {
   await page.goto("/en");
   await expect(page.getByRole("heading", { name: "Healthcare appointments" })).toBeVisible();

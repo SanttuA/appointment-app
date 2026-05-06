@@ -2295,8 +2295,14 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           ? t("confirmations.status.confirmNoShow")
           : t("confirmations.status.confirmCompleted");
     const destructive = isCancel || pendingConfirmation.type === "deleteTimeOff" || isNoShow;
+    const patientCancellationWindowClosed =
+      isCancel &&
+      user?.role === "PATIENT" &&
+      appointment !== null &&
+      appointmentStartsWithinHours(appointment, cancellationPolicyWarningHours);
     const showCancellationPolicy =
       isCancel &&
+      !patientCancellationWindowClosed &&
       appointment !== null &&
       appointmentStartsWithinHours(appointment, cancellationPolicyWarningHours);
 
@@ -2360,7 +2366,21 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             </p>
           ) : null}
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          {patientCancellationWindowClosed ? (
+            <p
+              className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
+              role="alert"
+            >
+              {errorMessage("CANCELLATION_WINDOW_CLOSED")}
+            </p>
+          ) : null}
+
+          <div
+            className={[
+              "mt-5 grid gap-2",
+              patientCancellationWindowClosed ? "" : "sm:grid-cols-2",
+            ].join(" ")}
+          >
             <button
               className="btn-secondary"
               disabled={saving}
@@ -2369,17 +2389,19 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             >
               {cancelLabel}
             </button>
-            <button
-              className={[
-                "rounded-md px-4 py-3 font-bold text-white transition disabled:opacity-60",
-                destructive ? "bg-red-700 hover:bg-red-800" : "bg-teal-700 hover:bg-teal-800",
-              ].join(" ")}
-              disabled={saving}
-              onClick={confirmPendingAction}
-              type="button"
-            >
-              {confirmLabel}
-            </button>
+            {patientCancellationWindowClosed ? null : (
+              <button
+                className={[
+                  "rounded-md px-4 py-3 font-bold text-white transition disabled:opacity-60",
+                  destructive ? "bg-red-700 hover:bg-red-800" : "bg-teal-700 hover:bg-teal-800",
+                ].join(" ")}
+                disabled={saving}
+                onClick={confirmPendingAction}
+                type="button"
+              >
+                {confirmLabel}
+              </button>
+            )}
           </div>
         </section>
       </div>
