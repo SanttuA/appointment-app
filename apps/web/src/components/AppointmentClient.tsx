@@ -1567,9 +1567,16 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     );
   }
 
+  function canUpdateAppointmentStatus(appointment: Appointment) {
+    return (
+      appointment.status === "CONFIRMED" && new Date(appointment.startsAt).getTime() <= Date.now()
+    );
+  }
+
   function renderWorkerAppointmentEvent(appointment: Appointment, compact = false) {
     const current = isCurrentAppointment(appointment);
-    const showActions = appointment.status === "CONFIRMED";
+    const showActions = appointment.status === "CONFIRMED" && !compact;
+    const showStatusActions = canUpdateAppointmentStatus(appointment);
 
     return (
       <article
@@ -1624,25 +1631,29 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           </span>
         </div>
 
-        {showActions && !compact ? (
+        {showActions ? (
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="btn-primary flex items-center gap-2"
-              disabled={saving}
-              onClick={() => updateAppointmentStatus(appointment.id, "COMPLETED")}
-              type="button"
-            >
-              <Check aria-hidden="true" size={16} />
-              {t("worker.actions.markDone")}
-            </button>
-            <button
-              className="btn-secondary"
-              disabled={saving}
-              onClick={() => updateAppointmentStatus(appointment.id, "NO_SHOW")}
-              type="button"
-            >
-              {t("worker.actions.noShow")}
-            </button>
+            {showStatusActions ? (
+              <>
+                <button
+                  className="btn-primary flex items-center gap-2"
+                  disabled={saving}
+                  onClick={() => updateAppointmentStatus(appointment.id, "COMPLETED")}
+                  type="button"
+                >
+                  <Check aria-hidden="true" size={16} />
+                  {t("worker.actions.markDone")}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={saving}
+                  onClick={() => updateAppointmentStatus(appointment.id, "NO_SHOW")}
+                  type="button"
+                >
+                  {t("worker.actions.noShow")}
+                </button>
+              </>
+            ) : null}
             <button
               className="btn-secondary"
               disabled={saving}

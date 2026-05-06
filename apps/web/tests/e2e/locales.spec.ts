@@ -474,6 +474,22 @@ test("worker agenda shows patient details, status actions, and block time", asyn
     status: "CONFIRMED",
     worker,
   };
+  const futureAppointment = {
+    endsAt: "2026-05-04T09:15:00.000Z",
+    id: "appointment-future",
+    location: "Main clinic",
+    patient: {
+      ...patient,
+      email: "liisa@example.com",
+      id: "patient-future",
+      name: "Liisa Järvinen",
+      phone: "+358 50 222 3333",
+    },
+    service,
+    startsAt: "2026-05-04T09:00:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
   const longWeekAppointment = {
     endsAt: "2026-05-07T06:15:00.000Z",
     id: "appointment-long-week",
@@ -490,7 +506,7 @@ test("worker agenda shows patient details, status actions, and block time", asyn
     status: "CANCELED",
     worker,
   };
-  let currentAppointments = [appointment, longWeekAppointment];
+  let currentAppointments = [appointment, futureAppointment, longWeekAppointment];
   let currentTimeOff: unknown[] = [];
   let statusRequest: Record<string, unknown> | null = null;
   let blockRequest: Record<string, unknown> | null = null;
@@ -556,6 +572,11 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
   await expect(page.getByText("Matti Virtanen")).toBeVisible();
   await expect(page.getByText("+358 40 123 4567")).toBeVisible();
+  const futureCard = page.getByTestId("worker-appointment-appointment-future");
+  await expect(futureCard).toContainText("Liisa Järvinen");
+  await expect(futureCard.getByRole("button", { name: "Mark done" })).toHaveCount(0);
+  await expect(futureCard.getByRole("button", { name: "No-show" })).toHaveCount(0);
+  await expect(futureCard.getByRole("button", { name: "Cancel" })).toBeVisible();
 
   await page.getByRole("button", { name: "Mark done" }).click();
   await expect.poll(() => statusRequest?.status).toBe("COMPLETED");
@@ -583,7 +604,7 @@ test("worker agenda shows patient details, status actions, and block time", asyn
         pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       };
     });
-  expect(weekLayout).toEqual({ cardCount: 2, cardsContained: true, pageFits: true });
+  expect(weekLayout).toEqual({ cardCount: 3, cardsContained: true, pageFits: true });
 
   await page.getByRole("button", { name: "Block time", exact: true }).click();
   await page.getByLabel("Reason").fill("Admin time");
