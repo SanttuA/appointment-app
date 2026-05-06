@@ -94,12 +94,23 @@ test("patients can reach appointments from tabs and the next appointment banner"
       worker,
     },
   ];
+  let currentAppointments = appointments;
+  let cancelRequest: Record<string, unknown> | null = null;
 
   await page.route("http://localhost:4000/auth/me", async (route) => {
     await route.fulfill({ json: { user: patient } });
   });
   await page.route("http://localhost:4000/appointments", async (route) => {
-    await route.fulfill({ json: { appointments } });
+    await route.fulfill({ json: { appointments: currentAppointments } });
+  });
+  await page.route("http://localhost:4000/appointments/appointment-one/cancel", async (route) => {
+    cancelRequest = route.request().postDataJSON() as Record<string, unknown>;
+    currentAppointments = currentAppointments.map((currentAppointment) =>
+      currentAppointment.id === "appointment-one"
+        ? { ...currentAppointment, status: "CANCELED" }
+        : currentAppointment,
+    );
+    await route.fulfill({ json: { appointment: currentAppointments[0] } });
   });
   await page.route("http://localhost:4000/services", async (route) => {
     await route.fulfill({ json: { services: [service] } });
@@ -153,6 +164,120 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await page.getByRole("button", { name: /Next appointment/ }).click();
   await expect(appointmentsTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("appointment-card-appointment-one")).toBeFocused();
+
+  const firstAppointmentCard = page.getByTestId("appointment-card-appointment-one");
+  await firstAppointmentCard.getByRole("button", { name: "Cancel" }).click();
+  const cancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
+  await expect(cancelDialog).toContainText("slot will become available");
+  expect(cancelRequest).toBeNull();
+
+  await cancelDialog.getByRole("button", { name: "Keep appointment" }).click();
+  await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
+  expect(cancelRequest).toBeNull();
+
+  await firstAppointmentCard.getByRole("button", { name: "Cancel" }).click();
+  await page
+    .getByRole("dialog", { name: "Cancel appointment?" })
+    .getByRole("button", { name: "Cancel appointment" })
+    .click();
+  await expect.poll(() => cancelRequest?.reason).toBe("Canceled by user");
+  await expect(page.getByTestId("appointment-card-appointment-one")).toContainText("Canceled");
+});
+
+test("patient cancellation confirmation lets the API decide cutoff state", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-05-04T08:00:00.000Z"));
+
+  const service = {
+    active: true,
+    description: { en: null, fi: null },
+    id: "service-general",
+    name: { en: "General practice", fi: "Yleislääkäri" },
+  };
+  const worker = {
+    active: true,
+    appointmentDurationMinutes: 30,
+    id: "worker-one",
+    location: "Main clinic",
+    name: "Dr. Aino Lehto",
+    services: [service],
+    timezone: "Europe/Helsinki",
+    title: "General practitioner",
+  };
+  const patient = {
+    email: "patient@example.com",
+    id: "patient-user",
+    name: "Patient User",
+    phone: null,
+    preferredLocale: "en",
+    role: "PATIENT",
+    workerProfile: null,
+  };
+  const appointment = {
+    endsAt: "2026-05-04T09:30:00.000Z",
+    id: "appointment-cutoff",
+    location: "East clinic",
+    patient,
+    service,
+    startsAt: "2026-05-04T09:00:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
+  let currentAppointments = [appointment];
+  let cancelRequest: Record<string, unknown> | null = null;
+
+  await page.route("http://localhost:4000/auth/me", async (route) => {
+    await route.fulfill({ json: { user: patient } });
+  });
+  await page.route("http://localhost:4000/appointments", async (route) => {
+    await route.fulfill({ json: { appointments: currentAppointments } });
+  });
+  await page.route(
+    "http://localhost:4000/appointments/appointment-cutoff/cancel",
+    async (route) => {
+      cancelRequest = route.request().postDataJSON() as Record<string, unknown>;
+      currentAppointments = currentAppointments.map((currentAppointment) =>
+        currentAppointment.id === appointment.id
+          ? { ...currentAppointment, status: "CANCELED" }
+          : currentAppointment,
+      );
+      await route.fulfill({ json: { appointment: currentAppointments[0] } });
+    },
+  );
+  await page.route("http://localhost:4000/services", async (route) => {
+    await route.fulfill({ json: { services: [service] } });
+  });
+  await page.route("http://localhost:4000/workers", async (route) => {
+    await route.fulfill({ json: { workers: [worker] } });
+  });
+  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
+    await route.fulfill({ json: { slots: [] } });
+  });
+
+  await page.goto("/en");
+  await page.getByRole("tab", { name: /My appointments/ }).click();
+  await page
+    .getByTestId("appointment-card-appointment-cutoff")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+
+  const cancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
+  await expect(cancelDialog).toContainText("less than 24 hours");
+  expect(cancelRequest).toBeNull();
+
+  await cancelDialog.getByRole("button", { name: "Keep appointment" }).click();
+  await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
+  expect(cancelRequest).toBeNull();
+
+  await page
+    .getByTestId("appointment-card-appointment-cutoff")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Cancel appointment?" })
+    .getByRole("button", { name: "Cancel appointment" })
+    .click();
+  await expect.poll(() => cancelRequest?.reason).toBe("Canceled by user");
+  await expect(page.getByTestId("appointment-card-appointment-cutoff")).toContainText("Canceled");
 });
 
 test("calendar selection recenters the 14-day date strip", async ({ page }) => {
@@ -599,6 +724,22 @@ test("worker agenda shows patient details, status actions, and block time", asyn
     status: "CONFIRMED",
     worker,
   };
+  const noShowAppointment = {
+    endsAt: "2026-05-04T07:45:00.000Z",
+    id: "appointment-no-show",
+    location: "Main clinic",
+    patient: {
+      ...patient,
+      email: "no-show@example.com",
+      id: "patient-no-show",
+      name: "No Show Patient",
+      phone: null,
+    },
+    service,
+    startsAt: "2026-05-04T07:30:00.000Z",
+    status: "CONFIRMED",
+    worker,
+  };
   const futureAppointment = {
     endsAt: "2026-05-04T09:15:00.000Z",
     id: "appointment-future",
@@ -631,10 +772,17 @@ test("worker agenda shows patient details, status actions, and block time", asyn
     status: "CANCELED",
     worker,
   };
-  let currentAppointments = [appointment, futureAppointment, longWeekAppointment];
+  let currentAppointments = [
+    appointment,
+    noShowAppointment,
+    futureAppointment,
+    longWeekAppointment,
+  ];
   let currentTimeOff: unknown[] = [];
-  let statusRequest: Record<string, unknown> | null = null;
+  const statusRequests: Record<string, Record<string, unknown>> = {};
+  let cancelRequest: Record<string, unknown> | null = null;
   let blockRequest: Record<string, unknown> | null = null;
+  let deleteTimeOffRequestSent = false;
 
   await page.route("http://localhost:4000/auth/me", async (route) => {
     await route.fulfill({ json: { user: workerUser } });
@@ -642,15 +790,43 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   await page.route("http://localhost:4000/appointments", async (route) => {
     await route.fulfill({ json: { appointments: currentAppointments } });
   });
-  await page.route("http://localhost:4000/appointments/appointment-one/status", async (route) => {
-    statusRequest = route.request().postDataJSON() as Record<string, unknown>;
+  await page.route(/http:\/\/localhost:4000\/appointments\/.*\/status/, async (route) => {
+    const appointmentId = new URL(route.request().url()).pathname.split("/")[2] ?? "";
+    const statusRequest = route.request().postDataJSON() as Record<string, unknown>;
+    statusRequests[appointmentId] = statusRequest;
     currentAppointments = currentAppointments.map((currentAppointment) =>
-      currentAppointment.id === appointment.id
-        ? { ...currentAppointment, status: "COMPLETED" }
+      currentAppointment.id === appointmentId
+        ? { ...currentAppointment, status: statusRequest.status as string }
         : currentAppointment,
     );
-    await route.fulfill({ json: { appointment: currentAppointments[0] } });
+    await route.fulfill({
+      json: {
+        appointment:
+          currentAppointments.find(
+            (currentAppointment) => currentAppointment.id === appointmentId,
+          ) ?? currentAppointments[0],
+      },
+    });
   });
+  await page.route(
+    "http://localhost:4000/appointments/appointment-future/cancel",
+    async (route) => {
+      cancelRequest = route.request().postDataJSON() as Record<string, unknown>;
+      currentAppointments = currentAppointments.map((currentAppointment) =>
+        currentAppointment.id === futureAppointment.id
+          ? { ...currentAppointment, status: "CANCELED" }
+          : currentAppointment,
+      );
+      await route.fulfill({
+        json: {
+          appointment:
+            currentAppointments.find(
+              (currentAppointment) => currentAppointment.id === futureAppointment.id,
+            ) ?? currentAppointments[0],
+        },
+      });
+    },
+  );
   await page.route("http://localhost:4000/services", async (route) => {
     await route.fulfill({ json: { services: [service] } });
   });
@@ -687,6 +863,11 @@ test("worker agenda shows patient details, status actions, and block time", asyn
     ];
     await route.fulfill({ json: { timeOff: currentTimeOff[0] } });
   });
+  await page.route("http://localhost:4000/worker/time-off/time-off-one", async (route) => {
+    deleteTimeOffRequestSent = true;
+    currentTimeOff = [];
+    await route.fulfill({ json: {} });
+  });
 
   await page.goto("/en");
 
@@ -703,9 +884,41 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   await expect(futureCard.getByRole("button", { name: "No-show" })).toHaveCount(0);
   await expect(futureCard.getByRole("button", { name: "Cancel" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Mark done" }).click();
-  await expect.poll(() => statusRequest?.status).toBe("COMPLETED");
-  await expect(page.getByTestId("worker-appointment-appointment-one")).toContainText("Completed");
+  const currentCard = page.getByTestId("worker-appointment-appointment-one");
+  await currentCard.getByRole("button", { name: "Mark done" }).click();
+  const completedDialog = page.getByRole("dialog", { name: "Mark appointment done?" });
+  await expect(completedDialog).toContainText("Matti Virtanen");
+  expect(statusRequests["appointment-one"]).toBeUndefined();
+
+  await completedDialog.getByRole("button", { name: "Keep as confirmed" }).click();
+  await expect(page.getByRole("dialog", { name: "Mark appointment done?" })).toHaveCount(0);
+  expect(statusRequests["appointment-one"]).toBeUndefined();
+
+  await currentCard.getByRole("button", { name: "Mark done" }).click();
+  await page
+    .getByRole("dialog", { name: "Mark appointment done?" })
+    .getByRole("button", { name: "Mark done" })
+    .click();
+  await expect.poll(() => statusRequests["appointment-one"]?.status).toBe("COMPLETED");
+  await expect(currentCard).toContainText("Completed");
+
+  const noShowCard = page.getByTestId("worker-appointment-appointment-no-show");
+  await noShowCard.getByRole("button", { name: "No-show" }).click();
+  const noShowDialog = page.getByRole("dialog", { name: "Mark appointment no-show?" });
+  await expect(noShowDialog).toContainText("No Show Patient");
+  expect(statusRequests["appointment-no-show"]).toBeUndefined();
+  await noShowDialog.getByRole("button", { name: "Mark no-show" }).click();
+  await expect.poll(() => statusRequests["appointment-no-show"]?.status).toBe("NO_SHOW");
+  await expect(noShowCard).toContainText("No-show");
+
+  await futureCard.getByRole("button", { name: "Cancel" }).click();
+  const workerCancelDialog = page.getByRole("dialog", { name: "Cancel appointment?" });
+  await expect(workerCancelDialog).toContainText("Liisa Järvinen");
+  await expect(workerCancelDialog).not.toContainText("less than 24 hours");
+  expect(cancelRequest).toBeNull();
+  await workerCancelDialog.getByRole("button", { name: "Cancel appointment" }).click();
+  await expect.poll(() => cancelRequest?.reason).toBe("Canceled by user");
+  await expect(futureCard).toContainText("Canceled");
 
   await page.getByRole("tab", { name: "Week view" }).click();
   await expect(page.getByRole("button", { name: /Block time on/ }).first()).toContainText(
@@ -729,7 +942,7 @@ test("worker agenda shows patient details, status actions, and block time", asyn
         pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
       };
     });
-  expect(weekLayout).toEqual({ cardCount: 3, cardsContained: true, pageFits: true });
+  expect(weekLayout).toEqual({ cardCount: 4, cardsContained: true, pageFits: true });
 
   await page.getByRole("button", { name: "Block time", exact: true }).click();
   await page.getByLabel("Reason").fill("Admin time");
@@ -737,6 +950,24 @@ test("worker agenda shows patient details, status actions, and block time", asyn
 
   await expect.poll(() => blockRequest?.reason).toBe("Admin time");
   await expect(page.getByText("Admin time")).toBeVisible();
+
+  await page.getByRole("tab", { name: "My schedule" }).click();
+  await page.getByRole("button", { name: "Remove" }).click();
+  const removeBlockDialog = page.getByRole("dialog", { name: "Remove blocked time?" });
+  await expect(removeBlockDialog).toContainText("Admin time");
+  expect(deleteTimeOffRequestSent).toBe(false);
+
+  await removeBlockDialog.getByRole("button", { name: "Keep blocked time" }).click();
+  await expect(page.getByRole("dialog", { name: "Remove blocked time?" })).toHaveCount(0);
+  expect(deleteTimeOffRequestSent).toBe(false);
+
+  await page.getByRole("button", { name: "Remove" }).click();
+  await page
+    .getByRole("dialog", { name: "Remove blocked time?" })
+    .getByRole("button", { name: "Remove block" })
+    .click();
+  await expect.poll(() => deleteTimeOffRequestSent).toBe(true);
+  await expect(page.getByText("No upcoming blocked time.")).toBeVisible();
 });
 
 test("booking confirmation uses the context captured when the dialog opened", async ({ page }) => {

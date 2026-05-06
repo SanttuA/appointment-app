@@ -29,6 +29,7 @@ type Role = "PATIENT" | "WORKER" | "ADMIN";
 type PatientTab = "book" | "appointments";
 type WorkerTab = "agenda" | "week" | "schedule";
 type AppointmentStatus = "CONFIRMED" | "CANCELED" | "COMPLETED" | "NO_SHOW";
+type WorkerAppointmentStatusAction = Extract<AppointmentStatus, "COMPLETED" | "NO_SHOW">;
 
 type User = {
   id: string;
@@ -126,6 +127,21 @@ type TimeOff = {
   reason: string | null;
 };
 
+type PendingConfirmation =
+  | {
+      type: "cancelAppointment";
+      appointment: Appointment;
+    }
+  | {
+      type: "updateAppointmentStatus";
+      appointment: Appointment;
+      status: WorkerAppointmentStatusAction;
+    }
+  | {
+      type: "deleteTimeOff";
+      entry: TimeOff;
+    };
+
 type WorkerDayForm = {
   weekday: number;
   active: boolean;
@@ -145,6 +161,7 @@ type ApiErrorBody = {
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const bookingHorizonDays = 90;
+const cancellationPolicyWarningHours = 24;
 const dateStripDayCount = 14;
 const dateStripCenterOffset = 6;
 const scheduleWeekdays = [1, 2, 3, 4, 5, 6, 0];
@@ -390,6 +407,11 @@ function calendarDate(value: string) {
 
 function appointmentLocation(appointment: Appointment) {
   return appointment.location ?? appointment.worker.location;
+}
+
+function appointmentStartsWithinHours(appointment: Appointment, hours: number) {
+  const startsInMs = new Date(appointment.startsAt).getTime() - Date.now();
+  return startsInMs < hours * 60 * 60 * 1000;
 }
 
 function calendarHref(appointment: Appointment, locale: Locale) {
@@ -674,6 +696,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   const [pendingBooking, setPendingBooking] = useState<BookingContext | null>(null);
   const [bookingDialogContext, setBookingDialogContext] = useState<BookingContext | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
   const [reschedulingAppointment, setReschedulingAppointment] = useState<Appointment | null>(null);
   const [focusAppointmentId, setFocusAppointmentId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -1043,17 +1066,18 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }, [authDialogOpen, authMode]);
 
   useEffect(() => {
-    if (!authDialogOpen && !profileMenuOpen) return;
+    if (!authDialogOpen && !profileMenuOpen && !pendingConfirmation) return;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (pendingConfirmation) closeConfirmationDialog();
       if (authDialogOpen) closeAuthDialog();
       setProfileMenuOpen(false);
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [authDialogOpen, profileMenuOpen, saving]);
+  }, [authDialogOpen, pendingConfirmation, profileMenuOpen, saving]);
 
   useEffect(() => {
     if (activeTab !== "appointments" || !focusAppointmentId) return;
@@ -1352,13 +1376,58 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     setConfirmedAppointment(null);
   }
 
+  function openCancelAppointmentConfirmation(appointment: Appointment) {
+    setPendingConfirmation({ appointment, type: "cancelAppointment" });
+    setError(null);
+    setNotice(null);
+  }
+
+  function openAppointmentStatusConfirmation(
+    appointment: Appointment,
+    status: WorkerAppointmentStatusAction,
+  ) {
+    setPendingConfirmation({ appointment, status, type: "updateAppointmentStatus" });
+    setError(null);
+    setNotice(null);
+  }
+
+  function openDeleteTimeOffConfirmation(entry: TimeOff) {
+    setPendingConfirmation({ entry, type: "deleteTimeOff" });
+    setError(null);
+    setNotice(null);
+  }
+
+  function closeConfirmationDialog() {
+    if (saving) return;
+    setPendingConfirmation(null);
+  }
+
+  async function confirmPendingAction() {
+    const confirmation = pendingConfirmation;
+    if (!confirmation) return;
+
+    if (confirmation.type === "cancelAppointment") {
+      await cancelAppointment(confirmation.appointment.id);
+    } else if (confirmation.type === "updateAppointmentStatus") {
+      await updateAppointmentStatus(confirmation.appointment.id, confirmation.status);
+    } else {
+      await deleteTimeOff(confirmation.entry.id);
+    }
+
+    setPendingConfirmation(null);
+  }
+
   async function cancelAppointment(id: string) {
     await run(async () => {
       await apiRequest(`/appointments/${id}/cancel`, {
         method: "POST",
         body: JSON.stringify({ reason: "Canceled by user" }),
       });
-      await Promise.all([refreshSession(), fetchSlots()]);
+      if (user?.role === "WORKER") {
+        await refreshSession();
+      } else {
+        await Promise.all([refreshSession(), fetchSlots()]);
+      }
       if (reschedulingAppointment?.id === id) setReschedulingAppointment(null);
     }, t("notices.appointmentCanceled"));
   }
@@ -1411,10 +1480,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     }, t("notices.availabilitySaved"));
   }
 
-  async function updateAppointmentStatus(
-    id: string,
-    status: Extract<AppointmentStatus, "COMPLETED" | "NO_SHOW">,
-  ) {
+  async function updateAppointmentStatus(id: string, status: WorkerAppointmentStatusAction) {
     await run(async () => {
       await apiRequest(`/appointments/${id}/status`, {
         method: "PATCH",
@@ -1549,7 +1615,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             <button
               className="btn-secondary"
               disabled={saving}
-              onClick={() => cancelAppointment(appointment.id)}
+              onClick={() => openCancelAppointmentConfirmation(appointment)}
               type="button"
             >
               {t("appointments.cancel")}
@@ -1644,7 +1710,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 <button
                   className="btn-primary flex items-center gap-2"
                   disabled={saving}
-                  onClick={() => updateAppointmentStatus(appointment.id, "COMPLETED")}
+                  onClick={() => openAppointmentStatusConfirmation(appointment, "COMPLETED")}
                   type="button"
                 >
                   <Check aria-hidden="true" size={16} />
@@ -1653,7 +1719,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                 <button
                   className="btn-secondary"
                   disabled={saving}
-                  onClick={() => updateAppointmentStatus(appointment.id, "NO_SHOW")}
+                  onClick={() => openAppointmentStatusConfirmation(appointment, "NO_SHOW")}
                   type="button"
                 >
                   {t("worker.actions.noShow")}
@@ -1663,7 +1729,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
             <button
               className="btn-secondary"
               disabled={saving}
-              onClick={() => cancelAppointment(appointment.id)}
+              onClick={() => openCancelAppointmentConfirmation(appointment)}
               type="button"
             >
               {t("appointments.cancel")}
@@ -2164,7 +2230,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
                           aria-label={t("worker.timeOff.remove")}
                           className="btn-secondary flex shrink-0 items-center justify-center gap-2"
                           disabled={saving}
-                          onClick={() => deleteTimeOff(entry.id)}
+                          onClick={() => openDeleteTimeOffConfirmation(entry)}
                           type="button"
                         >
                           <Trash2 aria-hidden="true" size={16} />
@@ -2185,6 +2251,139 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           </div>
         ) : null}
       </section>
+    );
+  }
+
+  function renderConfirmationDialog() {
+    if (!pendingConfirmation) return null;
+
+    const appointment =
+      pendingConfirmation.type === "cancelAppointment" ||
+      pendingConfirmation.type === "updateAppointmentStatus"
+        ? pendingConfirmation.appointment
+        : null;
+    const timeOffEntry =
+      pendingConfirmation.type === "deleteTimeOff" ? pendingConfirmation.entry : null;
+    const isCancel = pendingConfirmation.type === "cancelAppointment";
+    const isNoShow =
+      pendingConfirmation.type === "updateAppointmentStatus" &&
+      pendingConfirmation.status === "NO_SHOW";
+    const title = isCancel
+      ? t("confirmations.cancel.title")
+      : pendingConfirmation.type === "deleteTimeOff"
+        ? t("confirmations.block.title")
+        : isNoShow
+          ? t("confirmations.status.noShowTitle")
+          : t("confirmations.status.completedTitle");
+    const description = isCancel
+      ? t("confirmations.cancel.description")
+      : pendingConfirmation.type === "deleteTimeOff"
+        ? t("confirmations.block.description")
+        : isNoShow
+          ? t("confirmations.status.noShowDescription")
+          : t("confirmations.status.completedDescription");
+    const cancelLabel = isCancel
+      ? t("confirmations.cancel.keep")
+      : pendingConfirmation.type === "deleteTimeOff"
+        ? t("confirmations.block.keep")
+        : t("confirmations.status.keep");
+    const confirmLabel = isCancel
+      ? t("confirmations.cancel.confirm")
+      : pendingConfirmation.type === "deleteTimeOff"
+        ? t("confirmations.block.confirm")
+        : isNoShow
+          ? t("confirmations.status.confirmNoShow")
+          : t("confirmations.status.confirmCompleted");
+    const destructive = isCancel || pendingConfirmation.type === "deleteTimeOff" || isNoShow;
+    const showCancellationPolicy =
+      isCancel &&
+      user?.role === "PATIENT" &&
+      appointment !== null &&
+      appointmentStartsWithinHours(appointment, cancellationPolicyWarningHours);
+
+    return (
+      <div className="fixed inset-0 z-40 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6">
+        <section
+          aria-describedby="confirmation-dialog-description"
+          aria-labelledby="confirmation-dialog-title"
+          aria-modal="true"
+          className="surface max-h-full w-full overflow-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-md"
+          role="dialog"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold" id="confirmation-dialog-title">
+                {title}
+              </h2>
+              <p className="muted mt-1 text-sm" id="confirmation-dialog-description">
+                {description}
+              </p>
+            </div>
+            <button
+              aria-label={t("auth.close")}
+              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+              disabled={saving}
+              onClick={closeConfirmationDialog}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+
+          {appointment ? (
+            <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
+              <p className="font-bold">
+                {formatDateTime(appointment.startsAt, locale, appointment.worker.timezone)}
+              </p>
+              <p className="muted mt-1 text-sm">
+                {serviceName(appointment.service, locale)} · {appointment.worker.name} ·{" "}
+                {appointmentLocation(appointment)}
+              </p>
+              {user?.role !== "PATIENT" ? (
+                <p className="muted mt-1 text-sm">{appointment.patient.name}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {timeOffEntry ? (
+            <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
+              <p className="font-bold">{timeOffEntry.reason ?? t("worker.block.blocked")}</p>
+              <p className="muted mt-1 text-sm">
+                {formatDateTime(timeOffEntry.startsAt, locale, workerTimeZone)} -{" "}
+                {formatDateTime(timeOffEntry.endsAt, locale, workerTimeZone)}
+              </p>
+            </div>
+          ) : null}
+
+          {showCancellationPolicy ? (
+            <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+              {t("confirmations.cancel.policyWarning")}
+            </p>
+          ) : null}
+
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <button
+              className="btn-secondary"
+              disabled={saving}
+              onClick={closeConfirmationDialog}
+              type="button"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              className={[
+                "rounded-md px-4 py-3 font-bold text-white transition disabled:opacity-60",
+                destructive ? "bg-red-700 hover:bg-red-800" : "bg-teal-700 hover:bg-teal-800",
+              ].join(" ")}
+              disabled={saving}
+              onClick={confirmPendingAction}
+              type="button"
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -2689,6 +2888,8 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           ) : null}
         </div>
       </div>
+
+      {renderConfirmationDialog()}
 
       {bookingDialogOpen ? (
         <div className="fixed inset-0 z-30 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6">
