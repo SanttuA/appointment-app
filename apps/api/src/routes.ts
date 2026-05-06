@@ -16,6 +16,7 @@ import { ApiError } from "./errors.js";
 import { AppointmentStatus, Locale, Role, type Prisma } from "./generated/prisma/client.js";
 import {
   assertSlotIncrement,
+  appointmentHasStarted,
   bookingHorizonDays,
   bufferedConflictLookupRange,
   generateScheduleSlots,
@@ -745,6 +746,13 @@ function registerAppointmentRoutes(app: FastifyInstance) {
     }
     if (appointment.status !== AppointmentStatus.CONFIRMED) {
       throw new ApiError(400, "APPOINTMENT_NOT_ACTIVE", "Only active appointments can be updated");
+    }
+    if (!appointmentHasStarted(appointment)) {
+      throw new ApiError(
+        400,
+        "APPOINTMENT_NOT_STARTED",
+        "Appointment status can only be updated after the start time",
+      );
     }
 
     const updated = await prisma.appointment.update({

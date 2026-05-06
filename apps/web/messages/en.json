@@ -95,6 +95,7 @@
     "END_DATE_INVALID": "Choose a valid end time.",
     "DATE_RANGE_INVALID": "End time must be after start time.",
     "APPOINTMENT_NOT_ACTIVE": "Only active appointments can be updated.",
+    "APPOINTMENT_NOT_STARTED": "Appointment status can only be updated after the start time.",
     "VALIDATION_FAILED": "Check the form fields and try again."
   },
   "fields": {

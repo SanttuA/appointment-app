@@ -135,6 +135,13 @@ export function bufferedConflictLookupRange(range: TimeRange, bufferMinutes = 0)
   };
 }
 
+export function appointmentHasStarted(
+  appointment: Pick<Appointment, "startsAt">,
+  now = new Date(),
+) {
+  return appointment.startsAt <= now;
+}
+
 function generateCandidateSlots(input: GenerateSlotsInput) {
   const slots: Slot[] = [];
   const startStepMinutes = Math.max(

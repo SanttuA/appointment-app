@@ -95,6 +95,7 @@
     "END_DATE_INVALID": "Valitse kelvollinen päättymisaika.",
     "DATE_RANGE_INVALID": "Päättymisajan on oltava alkamisen jälkeen.",
     "APPOINTMENT_NOT_ACTIVE": "Vain aktiivisia ajanvarauksia voi päivittää.",
+    "APPOINTMENT_NOT_STARTED": "Ajanvarauksen tilaa voi päivittää vasta alkamisen jälkeen.",
     "VALIDATION_FAILED": "Tarkista lomakkeen kentät ja yritä uudelleen."
   },
   "fields": {

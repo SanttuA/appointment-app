@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appointmentHasStarted,
   bufferedConflictLookupRange,
   generateScheduleSlots,
   generateSlots,
@@ -174,5 +175,19 @@ describe("scheduling", () => {
         booked: [previousAppointment],
       }),
     ).toEqual([]);
+  });
+
+  it("only allows status completion transitions once an appointment has started", () => {
+    const now = new Date("2026-05-04T09:00:00.000Z");
+
+    expect(appointmentHasStarted({ startsAt: new Date("2026-05-04T08:59:59.000Z") }, now)).toBe(
+      true,
+    );
+    expect(appointmentHasStarted({ startsAt: new Date("2026-05-04T09:00:00.000Z") }, now)).toBe(
+      true,
+    );
+    expect(appointmentHasStarted({ startsAt: new Date("2026-05-04T09:00:01.000Z") }, now)).toBe(
+      false,
+    );
   });
 });
