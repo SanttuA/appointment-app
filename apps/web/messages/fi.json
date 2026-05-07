@@ -1,12 +1,78 @@
 {
   "admin": {
-    "createService": "Luo palvelu",
-    "createUser": "Luo käyttäjä",
-    "saveService": "Tallenna palvelu",
-    "saveUser": "Tallenna käyttäjä",
+    "actions": {
+      "disable": "Poista käytöstä",
+      "edit": "Muokkaa",
+      "enable": "Ota käyttöön"
+    },
+    "booking": {
+      "available": "Vapaa",
+      "subtitle": "Vain luku -näkymä potilaille näkyvien aikojen tarkistamiseen.",
+      "title": "Varausnäkymä"
+    },
+    "drawer": {
+      "close": "Sulje paneeli"
+    },
+    "empty": "—",
+    "overview": {
+      "acrossWorkers": "{count, plural, one {# työntekijällä} other {# työntekijällä}}",
+      "allWorkers": "Kaikki työntekijät",
+      "appointmentsToday": "Ajanvarauksia tänään",
+      "availableSlotsToday": "Vapaita aikoja tänään",
+      "cancellationsThisWeek": "Peruutuksia tällä viikolla",
+      "noAppointments": "Tänään ei ole vahvistettuja ajanvarauksia.",
+      "thisWeek": "Kuluva kalenteriviikko",
+      "todaySchedule": "Tämän päivän ajanvaraukset — {date}",
+      "totalUsers": "Käyttäjiä yhteensä",
+      "userBreakdown": "{workers} työntekijää · {patients} potilasta"
+    },
     "serviceNameEn": "Palvelun nimi englanniksi",
     "serviceNameFi": "Palvelun nimi suomeksi",
-    "title": "Ylläpidon hallinta"
+    "services": {
+      "add": "Lisää palvelu",
+      "descriptionEn": "Kuvaus englanniksi",
+      "descriptionFi": "Kuvaus suomeksi",
+      "drawerSubtitle": "Palvelun saatavuus määräytyy työntekijöiden palvelujen ja aikataulujen mukaan.",
+      "duration": "{count} min ajat",
+      "edit": "Muokkaa palvelua",
+      "empty": "Ei palveluja.",
+      "noLocations": "Ei sijainteja",
+      "noWorkers": "Ei liitettyjä työntekijöitä",
+      "saveEdit": "Tallenna palvelu",
+      "saveNew": "Luo palvelu",
+      "subtitle": "Hallitse potilaille näkyviä palveluja ja niiden tilaa.",
+      "title": "Palvelut"
+    },
+    "status": {
+      "active": "Aktiivinen",
+      "inactive": "Ei käytössä"
+    },
+    "tabs": {
+      "booking": "Varausnäkymä",
+      "overview": "Yhteenveto",
+      "services": "Palvelut",
+      "users": "Käyttäjät"
+    },
+    "tabsLabel": "Ylläpidon työtila",
+    "users": {
+      "add": "Lisää käyttäjä",
+      "allClinics": "Kaikki klinikat",
+      "columns": {
+        "actions": "Toiminnot",
+        "email": "Sähköposti",
+        "location": "Sijainti",
+        "name": "Nimi",
+        "role": "Rooli",
+        "status": "Tila"
+      },
+      "currentUser": "Et voi poistaa omaa ylläpitäjätiliäsi käytöstä.",
+      "drawerSubtitle": "Rooli ja työntekijän sijainti ovat tässä versiossa kiinteitä luonnin jälkeen.",
+      "edit": "Muokkaa käyttäjää",
+      "saveEdit": "Tallenna käyttäjä",
+      "saveNew": "Luo käyttäjä",
+      "subtitle": "Tarkista roolit, sijainnit ja tilien tila.",
+      "title": "Käyttäjät"
+    }
   },
   "app": {
     "subtitle": "Varaa aikoja, hallitse saatavuutta ja pidä käyttö saavutettavana.",
@@ -124,9 +190,11 @@
   },
   "fields": {
     "email": "Sähköposti",
+    "locale": "Kieli",
     "location": "Sijainti",
     "name": "Nimi",
     "password": "Salasana",
+    "phone": "Puhelin",
     "role": "Rooli",
     "service": "Palvelu",
     "startDate": "Aloituspäivä",
@@ -142,11 +210,17 @@
     "appointmentUpdated": "Ajanvaraus päivitetty.",
     "availabilitySaved": "Saatavuus tallennettu.",
     "serviceCreated": "Palvelu luotu.",
+    "serviceDisabled": "Palvelu poistettu käytöstä.",
+    "serviceEnabled": "Palvelu otettu käyttöön.",
+    "serviceUpdated": "Palvelu päivitetty.",
     "signedIn": "Kirjauduttu sisään.",
     "signedOut": "Kirjauduttu ulos.",
     "timeBlocked": "Aika estetty.",
     "timeBlockRemoved": "Esto poistettu.",
-    "userCreated": "Käyttäjä luotu."
+    "userCreated": "Käyttäjä luotu.",
+    "userDisabled": "Käyttäjä poistettu käytöstä.",
+    "userEnabled": "Käyttäjä otettu käyttöön.",
+    "userUpdated": "Käyttäjä päivitetty."
   },
   "roles": {
     "admin": "Ylläpitäjä",
