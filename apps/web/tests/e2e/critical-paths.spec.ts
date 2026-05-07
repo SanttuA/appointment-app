@@ -27,6 +27,22 @@ async function signInFromDialog(page: Page, email: string) {
   await authDialog.getByRole("button", { name: "Sign in" }).click();
 }
 
+async function selectFirstAvailableDate(page: Page) {
+  const dateButtons = page.locator('[data-testid^="strip-date-"]');
+  await expect(dateButtons.first()).toBeVisible();
+
+  for (let index = 0; index < (await dateButtons.count()); index += 1) {
+    const dateButton = dateButtons.nth(index);
+    if (await dateButton.isDisabled()) continue;
+
+    await dateButton.click();
+    await expect(dateButton).toHaveAttribute("aria-pressed", "true");
+    return;
+  }
+
+  throw new Error("No available E2E booking date found.");
+}
+
 test("patient can find, book, and view an appointment", async ({ page }, testInfo) => {
   const selectedWorkerName = workerName(testInfo);
 
@@ -37,6 +53,7 @@ test("patient can find, book, and view an appointment", async ({ page }, testInf
   await expect(workerSelect).toContainText(selectedWorkerName);
   await workerSelect.selectOption({ label: `${selectedWorkerName} · General practitioner` });
   await page.getByLabel("Service").selectOption({ label: "E2E General practice" });
+  await selectFirstAvailableDate(page);
 
   const bookButton = page.getByRole("button", { name: "Book" }).first();
   await expect(bookButton).toBeVisible();
