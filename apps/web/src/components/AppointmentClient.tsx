@@ -170,6 +170,45 @@ type AdminDrawer =
       serviceId?: string;
     };
 
+type AppDialogProps = {
+  children: React.ReactNode;
+  className: string;
+  labelledBy: string;
+  onClose: () => void;
+  backdropClassName: string;
+  describedBy?: string;
+  testId: string;
+};
+
+function AppDialog({
+  backdropClassName,
+  children,
+  className,
+  describedBy,
+  labelledBy,
+  onClose,
+  testId,
+}: AppDialogProps) {
+  function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    onClose();
+  }
+
+  return (
+    <div className={backdropClassName} data-testid={testId} onClick={handleBackdropClick}>
+      <section
+        aria-describedby={describedBy}
+        aria-labelledby={labelledBy}
+        aria-modal="true"
+        className={className}
+        role="dialog"
+      >
+        {children}
+      </section>
+    </div>
+  );
+}
+
 type AdminUserForm = {
   active: boolean;
   email: string;
@@ -795,6 +834,10 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     nameFi: "",
   });
   const authFirstFieldRef = useRef<HTMLInputElement>(null);
+  const bookingCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const blockFirstFieldRef = useRef<HTMLInputElement>(null);
+  const confirmationCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const adminDrawerCloseButtonRef = useRef<HTMLButtonElement>(null);
   const bookingTabRef = useRef<HTMLButtonElement>(null);
   const appointmentsTabRef = useRef<HTMLButtonElement>(null);
   const appointmentCardRefs = useRef(new Map<string, HTMLDivElement>());
@@ -1226,19 +1269,69 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }, [authDialogOpen, authMode]);
 
   useEffect(() => {
-    if (!authDialogOpen && !profileMenuOpen && !pendingConfirmation && !adminDrawer) return;
+    const focusTarget = pendingConfirmation
+      ? confirmationCancelButtonRef.current
+      : adminDrawer
+        ? adminDrawerCloseButtonRef.current
+        : bookingDialogOpen
+          ? bookingCloseButtonRef.current
+          : blockDialogOpen
+            ? blockFirstFieldRef.current
+            : null;
+
+    if (!focusTarget) return;
+    const focusTimer = window.setTimeout(() => focusTarget.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [adminDrawer, blockDialogOpen, bookingDialogOpen, pendingConfirmation]);
+
+  useEffect(() => {
+    if (
+      !authDialogOpen &&
+      !bookingDialogOpen &&
+      !blockDialogOpen &&
+      !profileMenuOpen &&
+      !pendingConfirmation &&
+      !adminDrawer
+    ) {
+      return;
+    }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (pendingConfirmation) closeConfirmationDialog();
-      if (authDialogOpen) closeAuthDialog();
-      if (adminDrawer) closeAdminDrawer();
+      if (pendingConfirmation) {
+        closeConfirmationDialog();
+        return;
+      }
+      if (authDialogOpen) {
+        closeAuthDialog();
+        return;
+      }
+      if (bookingDialogOpen) {
+        closeBookingDialog();
+        return;
+      }
+      if (blockDialogOpen) {
+        closeBlockDialog();
+        return;
+      }
+      if (adminDrawer) {
+        closeAdminDrawer();
+        return;
+      }
       setProfileMenuOpen(false);
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [adminDrawer, authDialogOpen, pendingConfirmation, profileMenuOpen, saving]);
+  }, [
+    adminDrawer,
+    authDialogOpen,
+    blockDialogOpen,
+    bookingDialogOpen,
+    pendingConfirmation,
+    profileMenuOpen,
+    saving,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "appointments" || !focusAppointmentId) return;
@@ -1659,6 +1752,11 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     setBlockDialogOpen(true);
     setError(null);
     setNotice(null);
+  }
+
+  function closeBlockDialog() {
+    if (saving) return;
+    setBlockDialogOpen(false);
   }
 
   async function createBlockTime(event: React.FormEvent<HTMLFormElement>) {
@@ -3133,178 +3231,172 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
           : t("admin.services.add");
 
     return (
-      <div className="fixed inset-0 z-30 bg-slate-950/40">
-        <section
-          aria-labelledby="admin-drawer-title"
-          aria-modal="true"
-          className="surface ml-auto flex h-full w-full max-w-xl flex-col overflow-hidden rounded-none border-y-0 border-r-0 shadow-xl"
-          role="dialog"
-        >
-          <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] p-5">
-            <div>
-              <h2 className="text-xl font-bold" id="admin-drawer-title">
-                {title}
-              </h2>
-              <p className="muted mt-1 text-sm">
-                {adminDrawer.type === "user"
-                  ? t("admin.users.drawerSubtitle")
-                  : t("admin.services.drawerSubtitle")}
-              </p>
-            </div>
-            <button
-              aria-label={t("admin.drawer.close")}
-              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
-              disabled={saving}
-              onClick={closeAdminDrawer}
-              type="button"
-            >
-              <X aria-hidden="true" size={18} />
-            </button>
+      <AppDialog
+        backdropClassName="fixed inset-0 z-30 bg-slate-950/40"
+        className="surface ml-auto flex h-full w-[calc(100%-2rem)] max-w-xl flex-col overflow-hidden rounded-none border-y-0 border-r-0 shadow-xl"
+        labelledBy="admin-drawer-title"
+        onClose={closeAdminDrawer}
+        testId="admin-drawer-backdrop"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--line)] p-5">
+          <div>
+            <h2 className="text-xl font-bold" id="admin-drawer-title">
+              {title}
+            </h2>
+            <p className="muted mt-1 text-sm">
+              {adminDrawer.type === "user"
+                ? t("admin.users.drawerSubtitle")
+                : t("admin.services.drawerSubtitle")}
+            </p>
           </div>
+          <button
+            aria-label={t("admin.drawer.close")}
+            className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+            disabled={saving}
+            onClick={closeAdminDrawer}
+            ref={adminDrawerCloseButtonRef}
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
 
-          {adminDrawer.type === "user" ? (
-            <form
-              className="grid flex-1 content-start gap-4 overflow-auto p-5"
-              onSubmit={submitAdminUser}
-            >
+        {adminDrawer.type === "user" ? (
+          <form
+            className="grid flex-1 content-start gap-4 overflow-auto p-5"
+            onSubmit={submitAdminUser}
+          >
+            <label className="field">
+              <span>{t("fields.name")}</span>
+              <input
+                onChange={(event) => updateAdminUserForm({ name: event.target.value })}
+                required
+                value={adminUserForm.name}
+              />
+            </label>
+            <label className="field">
+              <span>{t("fields.email")}</span>
+              <input
+                disabled={adminDrawer.mode === "edit"}
+                onChange={(event) => updateAdminUserForm({ email: event.target.value })}
+                required
+                type="email"
+                value={adminUserForm.email}
+              />
+            </label>
+            <label className="field">
+              <span>{t("fields.phone")}</span>
+              <input
+                onChange={(event) => updateAdminUserForm({ phone: event.target.value })}
+                value={adminUserForm.phone}
+              />
+            </label>
+            <label className="field">
+              <span>{t("fields.role")}</span>
+              <select
+                disabled={adminDrawer.mode === "edit"}
+                onChange={(event) => updateAdminUserForm({ role: event.target.value as Role })}
+                value={adminUserForm.role}
+              >
+                <option value="PATIENT">{t("roles.patient")}</option>
+                <option value="WORKER">{t("roles.worker")}</option>
+                <option value="ADMIN">{t("roles.admin")}</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("fields.locale")}</span>
+              <select
+                onChange={(event) =>
+                  updateAdminUserForm({ preferredLocale: event.target.value as Locale })
+                }
+                value={adminUserForm.preferredLocale}
+              >
+                <option value="en">English</option>
+                <option value="fi">Suomi</option>
+              </select>
+            </label>
+            {adminUserForm.role === "WORKER" ? (
               <label className="field">
-                <span>{t("fields.name")}</span>
-                <input
-                  onChange={(event) => updateAdminUserForm({ name: event.target.value })}
-                  required
-                  value={adminUserForm.name}
-                />
-              </label>
-              <label className="field">
-                <span>{t("fields.email")}</span>
+                <span>{t("fields.location")}</span>
                 <input
                   disabled={adminDrawer.mode === "edit"}
-                  onChange={(event) => updateAdminUserForm({ email: event.target.value })}
-                  required
-                  type="email"
-                  value={adminUserForm.email}
+                  onChange={(event) => updateAdminUserForm({ workerLocation: event.target.value })}
+                  required={adminDrawer.mode === "create"}
+                  value={adminUserForm.workerLocation}
                 />
               </label>
-              <label className="field">
-                <span>{t("fields.phone")}</span>
-                <input
-                  onChange={(event) => updateAdminUserForm({ phone: event.target.value })}
-                  value={adminUserForm.phone}
-                />
-              </label>
-              <label className="field">
-                <span>{t("fields.role")}</span>
-                <select
-                  disabled={adminDrawer.mode === "edit"}
-                  onChange={(event) => updateAdminUserForm({ role: event.target.value as Role })}
-                  value={adminUserForm.role}
-                >
-                  <option value="PATIENT">{t("roles.patient")}</option>
-                  <option value="WORKER">{t("roles.worker")}</option>
-                  <option value="ADMIN">{t("roles.admin")}</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t("fields.locale")}</span>
-                <select
-                  onChange={(event) =>
-                    updateAdminUserForm({ preferredLocale: event.target.value as Locale })
-                  }
-                  value={adminUserForm.preferredLocale}
-                >
-                  <option value="en">English</option>
-                  <option value="fi">Suomi</option>
-                </select>
-              </label>
-              {adminUserForm.role === "WORKER" ? (
-                <label className="field">
-                  <span>{t("fields.location")}</span>
-                  <input
-                    disabled={adminDrawer.mode === "edit"}
-                    onChange={(event) =>
-                      updateAdminUserForm({ workerLocation: event.target.value })
-                    }
-                    required={adminDrawer.mode === "create"}
-                    value={adminUserForm.workerLocation}
-                  />
-                </label>
-              ) : null}
-              {adminDrawer.mode === "edit" ? (
-                <label className="flex items-center gap-2 font-semibold">
-                  <input
-                    checked={adminUserForm.active}
-                    disabled={editingCurrentUser}
-                    onChange={(event) => updateAdminUserForm({ active: event.target.checked })}
-                    type="checkbox"
-                  />
-                  {t("admin.status.active")}
-                </label>
-              ) : null}
-              {editingCurrentUser ? (
-                <p className="muted text-sm">{t("admin.users.currentUser")}</p>
-              ) : null}
-              <button className="btn-primary" disabled={saving} type="submit">
-                {adminDrawer.mode === "edit" ? t("admin.users.saveEdit") : t("admin.users.saveNew")}
-              </button>
-            </form>
-          ) : (
-            <form
-              className="grid flex-1 content-start gap-4 overflow-auto p-5"
-              onSubmit={submitAdminService}
-            >
-              <label className="field">
-                <span>{t("admin.serviceNameEn")}</span>
-                <input
-                  onChange={(event) => updateAdminServiceForm({ nameEn: event.target.value })}
-                  required
-                  value={adminServiceForm.nameEn}
-                />
-              </label>
-              <label className="field">
-                <span>{t("admin.serviceNameFi")}</span>
-                <input
-                  onChange={(event) => updateAdminServiceForm({ nameFi: event.target.value })}
-                  required
-                  value={adminServiceForm.nameFi}
-                />
-              </label>
-              <label className="field">
-                <span>{t("admin.services.descriptionEn")}</span>
-                <textarea
-                  onChange={(event) =>
-                    updateAdminServiceForm({ descriptionEn: event.target.value })
-                  }
-                  rows={3}
-                  value={adminServiceForm.descriptionEn}
-                />
-              </label>
-              <label className="field">
-                <span>{t("admin.services.descriptionFi")}</span>
-                <textarea
-                  onChange={(event) =>
-                    updateAdminServiceForm({ descriptionFi: event.target.value })
-                  }
-                  rows={3}
-                  value={adminServiceForm.descriptionFi}
-                />
-              </label>
+            ) : null}
+            {adminDrawer.mode === "edit" ? (
               <label className="flex items-center gap-2 font-semibold">
                 <input
-                  checked={adminServiceForm.active}
-                  onChange={(event) => updateAdminServiceForm({ active: event.target.checked })}
+                  checked={adminUserForm.active}
+                  disabled={editingCurrentUser}
+                  onChange={(event) => updateAdminUserForm({ active: event.target.checked })}
                   type="checkbox"
                 />
                 {t("admin.status.active")}
               </label>
-              <button className="btn-primary" disabled={saving} type="submit">
-                {adminDrawer.mode === "edit"
-                  ? t("admin.services.saveEdit")
-                  : t("admin.services.saveNew")}
-              </button>
-            </form>
-          )}
-        </section>
-      </div>
+            ) : null}
+            {editingCurrentUser ? (
+              <p className="muted text-sm">{t("admin.users.currentUser")}</p>
+            ) : null}
+            <button className="btn-primary" disabled={saving} type="submit">
+              {adminDrawer.mode === "edit" ? t("admin.users.saveEdit") : t("admin.users.saveNew")}
+            </button>
+          </form>
+        ) : (
+          <form
+            className="grid flex-1 content-start gap-4 overflow-auto p-5"
+            onSubmit={submitAdminService}
+          >
+            <label className="field">
+              <span>{t("admin.serviceNameEn")}</span>
+              <input
+                onChange={(event) => updateAdminServiceForm({ nameEn: event.target.value })}
+                required
+                value={adminServiceForm.nameEn}
+              />
+            </label>
+            <label className="field">
+              <span>{t("admin.serviceNameFi")}</span>
+              <input
+                onChange={(event) => updateAdminServiceForm({ nameFi: event.target.value })}
+                required
+                value={adminServiceForm.nameFi}
+              />
+            </label>
+            <label className="field">
+              <span>{t("admin.services.descriptionEn")}</span>
+              <textarea
+                onChange={(event) => updateAdminServiceForm({ descriptionEn: event.target.value })}
+                rows={3}
+                value={adminServiceForm.descriptionEn}
+              />
+            </label>
+            <label className="field">
+              <span>{t("admin.services.descriptionFi")}</span>
+              <textarea
+                onChange={(event) => updateAdminServiceForm({ descriptionFi: event.target.value })}
+                rows={3}
+                value={adminServiceForm.descriptionFi}
+              />
+            </label>
+            <label className="flex items-center gap-2 font-semibold">
+              <input
+                checked={adminServiceForm.active}
+                onChange={(event) => updateAdminServiceForm({ active: event.target.checked })}
+                type="checkbox"
+              />
+              {t("admin.status.active")}
+            </label>
+            <button className="btn-primary" disabled={saving} type="submit">
+              {adminDrawer.mode === "edit"
+                ? t("admin.services.saveEdit")
+                : t("admin.services.saveNew")}
+            </button>
+          </form>
+        )}
+      </AppDialog>
     );
   }
 
@@ -3356,88 +3448,88 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       appointmentStartsWithinHours(appointment, cancellationPolicyWarningHours);
 
     return (
-      <div className="fixed inset-0 z-40 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6">
-        <section
-          aria-describedby="confirmation-dialog-description"
-          aria-labelledby="confirmation-dialog-title"
-          aria-modal="true"
-          className="surface max-h-full w-full overflow-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-md"
-          role="dialog"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold" id="confirmation-dialog-title">
-                {title}
-              </h2>
-              <p className="muted mt-1 text-sm" id="confirmation-dialog-description">
-                {description}
-              </p>
-            </div>
-            <button
-              aria-label={t("auth.close")}
-              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
-              disabled={saving}
-              onClick={closeConfirmationDialog}
-              type="button"
-            >
-              <X aria-hidden="true" size={18} />
-            </button>
-          </div>
-
-          {appointment ? (
-            <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
-              <p className="font-bold">
-                {formatDateTime(appointment.startsAt, locale, appointment.worker.timezone)}
-              </p>
-              <p className="muted mt-1 text-sm">
-                {serviceName(appointment.service, locale)} · {appointment.worker.name} ·{" "}
-                {appointmentLocation(appointment)}
-              </p>
-              {user?.role !== "PATIENT" ? (
-                <p className="muted mt-1 text-sm">{appointment.patient.name}</p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {timeOffEntry ? (
-            <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
-              <p className="font-bold">{timeOffEntry.reason ?? t("worker.block.blocked")}</p>
-              <p className="muted mt-1 text-sm">
-                {formatDateTime(timeOffEntry.startsAt, locale, workerTimeZone)} -{" "}
-                {formatDateTime(timeOffEntry.endsAt, locale, workerTimeZone)}
-              </p>
-            </div>
-          ) : null}
-
-          {showCancellationPolicy ? (
-            <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
-              {t("confirmations.cancel.policyWarning")}
+      <AppDialog
+        backdropClassName="fixed inset-0 z-40 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6"
+        className="surface max-h-full w-full overflow-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-md"
+        describedBy="confirmation-dialog-description"
+        labelledBy="confirmation-dialog-title"
+        onClose={closeConfirmationDialog}
+        testId="confirmation-dialog-backdrop"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold" id="confirmation-dialog-title">
+              {title}
+            </h2>
+            <p className="muted mt-1 text-sm" id="confirmation-dialog-description">
+              {description}
             </p>
-          ) : null}
-
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
-            <button
-              className="btn-secondary"
-              disabled={saving}
-              onClick={closeConfirmationDialog}
-              type="button"
-            >
-              {cancelLabel}
-            </button>
-            <button
-              className={[
-                "rounded-md px-4 py-3 font-bold text-white transition disabled:opacity-60",
-                destructive ? "bg-red-700 hover:bg-red-800" : "bg-teal-700 hover:bg-teal-800",
-              ].join(" ")}
-              disabled={saving}
-              onClick={confirmPendingAction}
-              type="button"
-            >
-              {confirmLabel}
-            </button>
           </div>
-        </section>
-      </div>
+          <button
+            aria-label={t("auth.close")}
+            className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+            disabled={saving}
+            onClick={closeConfirmationDialog}
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+
+        {appointment ? (
+          <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
+            <p className="font-bold">
+              {formatDateTime(appointment.startsAt, locale, appointment.worker.timezone)}
+            </p>
+            <p className="muted mt-1 text-sm">
+              {serviceName(appointment.service, locale)} · {appointment.worker.name} ·{" "}
+              {appointmentLocation(appointment)}
+            </p>
+            {user?.role !== "PATIENT" ? (
+              <p className="muted mt-1 text-sm">{appointment.patient.name}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {timeOffEntry ? (
+          <div className="mt-5 rounded-md border border-[var(--line)] bg-slate-50 p-4">
+            <p className="font-bold">{timeOffEntry.reason ?? t("worker.block.blocked")}</p>
+            <p className="muted mt-1 text-sm">
+              {formatDateTime(timeOffEntry.startsAt, locale, workerTimeZone)} -{" "}
+              {formatDateTime(timeOffEntry.endsAt, locale, workerTimeZone)}
+            </p>
+          </div>
+        ) : null}
+
+        {showCancellationPolicy ? (
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+            {t("confirmations.cancel.policyWarning")}
+          </p>
+        ) : null}
+
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <button
+            className="btn-secondary"
+            disabled={saving}
+            onClick={closeConfirmationDialog}
+            ref={confirmationCancelButtonRef}
+            type="button"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            className={[
+              "rounded-md px-4 py-3 font-bold text-white transition disabled:opacity-60",
+              destructive ? "bg-red-700 hover:bg-red-800" : "bg-teal-700 hover:bg-teal-800",
+            ].join(" ")}
+            disabled={saving}
+            onClick={confirmPendingAction}
+            type="button"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </AppDialog>
     );
   }
 
@@ -3867,254 +3959,250 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
       {renderAdminDrawer()}
 
       {bookingDialogOpen ? (
-        <div className="fixed inset-0 z-30 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6">
-          <section
-            aria-labelledby="booking-dialog-title"
-            aria-modal="true"
-            className="surface max-h-full w-full overflow-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-md"
-            role="dialog"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold" id="booking-dialog-title">
-                  {bookingDialogTitle}
-                </h2>
-                <p className="muted mt-1 text-sm">{bookingDialogSubtitle}</p>
-              </div>
-              <button
-                aria-label={t("auth.close")}
-                className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
-                disabled={saving}
-                onClick={closeBookingDialog}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
+        <AppDialog
+          backdropClassName="fixed inset-0 z-30 grid items-end bg-slate-950/50 px-0 sm:place-items-center sm:px-4 sm:py-6"
+          className="surface max-h-full w-full overflow-auto rounded-b-none p-5 shadow-xl sm:max-w-lg sm:rounded-md"
+          labelledBy="booking-dialog-title"
+          onClose={closeBookingDialog}
+          testId="booking-dialog-backdrop"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold" id="booking-dialog-title">
+                {bookingDialogTitle}
+              </h2>
+              <p className="muted mt-1 text-sm">{bookingDialogSubtitle}</p>
             </div>
+            <button
+              aria-label={t("auth.close")}
+              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+              disabled={saving}
+              onClick={closeBookingDialog}
+              ref={bookingCloseButtonRef}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
 
-            <dl className="mt-5 grid gap-3 text-sm">
-              <div className="border-b border-[var(--line)] pb-3">
-                <dt className="muted font-semibold">{t("booking.patient")}</dt>
-                <dd className="mt-1 font-bold">{user?.name ?? t("auth.account")}</dd>
-              </div>
-              <div className="border-b border-[var(--line)] pb-3">
-                <dt className="muted font-semibold">{t("booking.time")}</dt>
-                <dd className="mt-1 font-bold">{bookingDialogTime}</dd>
-              </div>
-              <div className="border-b border-[var(--line)] pb-3">
-                <dt className="muted font-semibold">{t("booking.clinician")}</dt>
-                <dd className="mt-1 font-bold">
-                  {bookingDialogClinician} · {bookingDialogService}
-                </dd>
-              </div>
-              <div>
-                <dt className="muted flex items-center gap-2 font-semibold">
-                  <MapPin aria-hidden="true" size={16} />
-                  {t("booking.location")}
-                </dt>
-                <dd className="mt-1 font-bold">{bookingDialogLocation}</dd>
-              </div>
-            </dl>
+          <dl className="mt-5 grid gap-3 text-sm">
+            <div className="border-b border-[var(--line)] pb-3">
+              <dt className="muted font-semibold">{t("booking.patient")}</dt>
+              <dd className="mt-1 font-bold">{user?.name ?? t("auth.account")}</dd>
+            </div>
+            <div className="border-b border-[var(--line)] pb-3">
+              <dt className="muted font-semibold">{t("booking.time")}</dt>
+              <dd className="mt-1 font-bold">{bookingDialogTime}</dd>
+            </div>
+            <div className="border-b border-[var(--line)] pb-3">
+              <dt className="muted font-semibold">{t("booking.clinician")}</dt>
+              <dd className="mt-1 font-bold">
+                {bookingDialogClinician} · {bookingDialogService}
+              </dd>
+            </div>
+            <div>
+              <dt className="muted flex items-center gap-2 font-semibold">
+                <MapPin aria-hidden="true" size={16} />
+                {t("booking.location")}
+              </dt>
+              <dd className="mt-1 font-bold">{bookingDialogLocation}</dd>
+            </div>
+          </dl>
 
-            <p className="muted mt-4 text-sm">{bookingDialogGuidance}</p>
+          <p className="muted mt-4 text-sm">{bookingDialogGuidance}</p>
 
-            {confirmedAppointment && calendarDownloadHref ? (
-              <a
-                className="btn-primary mt-5 flex items-center justify-center gap-2"
-                download={`appointment-${confirmedAppointment.id}.ics`}
-                href={calendarDownloadHref}
-              >
-                <Download aria-hidden="true" size={18} />
-                {t("booking.addToCalendar")}
-              </a>
-            ) : (
-              <button
-                className="btn-primary mt-5 w-full"
-                disabled={!bookingDialogContext || saving}
-                onClick={() => bookingDialogContext && bookSlot(bookingDialogContext)}
-                type="button"
-              >
-                {isReschedulingBooking ? t("booking.confirmReschedule") : t("booking.confirmBook")}
-              </button>
-            )}
-          </section>
-        </div>
+          {confirmedAppointment && calendarDownloadHref ? (
+            <a
+              className="btn-primary mt-5 flex items-center justify-center gap-2"
+              download={`appointment-${confirmedAppointment.id}.ics`}
+              href={calendarDownloadHref}
+            >
+              <Download aria-hidden="true" size={18} />
+              {t("booking.addToCalendar")}
+            </a>
+          ) : (
+            <button
+              className="btn-primary mt-5 w-full"
+              disabled={!bookingDialogContext || saving}
+              onClick={() => bookingDialogContext && bookSlot(bookingDialogContext)}
+              type="button"
+            >
+              {isReschedulingBooking ? t("booking.confirmReschedule") : t("booking.confirmBook")}
+            </button>
+          )}
+        </AppDialog>
       ) : null}
 
       {authDialogOpen ? (
-        <div className="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6">
-          <section
-            aria-labelledby="auth-dialog-title"
-            aria-modal="true"
-            className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
-            role="dialog"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold" id="auth-dialog-title">
-                  {pendingBooking ? t("booking.signInToBook") : t("auth.account")}
-                </h2>
-                {pendingBooking ? (
-                  <p className="muted mt-1 text-sm">
-                    {formatDateTime(
-                      pendingBooking.slot.startsAt,
-                      locale,
-                      pendingBookingWorker?.timezone,
-                    )}
-                  </p>
-                ) : null}
-              </div>
-              <button
-                aria-label={t("auth.close")}
-                className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
-                disabled={saving}
-                onClick={closeAuthDialog}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-
-            <form className="mt-5 grid gap-4" onSubmit={submitAuth}>
-              <div className="flex gap-2" aria-label={t("auth.mode")}>
-                <button
-                  className={authMode === "login" ? "btn-primary" : "btn-secondary"}
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError(null);
-                  }}
-                >
-                  {t("auth.login")}
-                </button>
-                <button
-                  className={authMode === "register" ? "btn-primary" : "btn-secondary"}
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("register");
-                    setAuthError(null);
-                  }}
-                >
-                  {t("auth.register")}
-                </button>
-              </div>
-              {authMode === "register" ? (
-                <label className="field">
-                  <span>{t("fields.name")}</span>
-                  <input
-                    ref={authFirstFieldRef}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    required
-                  />
-                </label>
-              ) : null}
-              <label className="field">
-                <span>{t("fields.email")}</span>
-                <input
-                  ref={authMode === "login" ? authFirstFieldRef : undefined}
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>{t("fields.password")}</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
-              {authError ? (
-                <p
-                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
-                  role="alert"
-                >
-                  {errorMessage(authError)}
+        <AppDialog
+          backdropClassName="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6"
+          className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
+          labelledBy="auth-dialog-title"
+          onClose={closeAuthDialog}
+          testId="auth-dialog-backdrop"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold" id="auth-dialog-title">
+                {pendingBooking ? t("booking.signInToBook") : t("auth.account")}
+              </h2>
+              {pendingBooking ? (
+                <p className="muted mt-1 text-sm">
+                  {formatDateTime(
+                    pendingBooking.slot.startsAt,
+                    locale,
+                    pendingBookingWorker?.timezone,
+                  )}
                 </p>
               ) : null}
-              <button className="btn-primary" type="submit" disabled={saving}>
-                {authMode === "register" ? t("auth.createAccount") : t("auth.signIn")}
+            </div>
+            <button
+              aria-label={t("auth.close")}
+              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+              disabled={saving}
+              onClick={closeAuthDialog}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+
+          <form className="mt-5 grid gap-4" onSubmit={submitAuth}>
+            <div className="flex gap-2" aria-label={t("auth.mode")}>
+              <button
+                className={authMode === "login" ? "btn-primary" : "btn-secondary"}
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError(null);
+                }}
+              >
+                {t("auth.login")}
               </button>
-            </form>
-          </section>
-        </div>
+              <button
+                className={authMode === "register" ? "btn-primary" : "btn-secondary"}
+                type="button"
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthError(null);
+                }}
+              >
+                {t("auth.register")}
+              </button>
+            </div>
+            {authMode === "register" ? (
+              <label className="field">
+                <span>{t("fields.name")}</span>
+                <input
+                  ref={authFirstFieldRef}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </label>
+            ) : null}
+            <label className="field">
+              <span>{t("fields.email")}</span>
+              <input
+                ref={authMode === "login" ? authFirstFieldRef : undefined}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>{t("fields.password")}</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            {authError ? (
+              <p
+                className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800"
+                role="alert"
+              >
+                {errorMessage(authError)}
+              </p>
+            ) : null}
+            <button className="btn-primary" type="submit" disabled={saving}>
+              {authMode === "register" ? t("auth.createAccount") : t("auth.signIn")}
+            </button>
+          </form>
+        </AppDialog>
       ) : null}
 
       {blockDialogOpen ? (
-        <div className="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6">
-          <section
-            aria-labelledby="block-dialog-title"
-            aria-modal="true"
-            className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
-            role="dialog"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold" id="block-dialog-title">
-                  {t("worker.block.title")}
-                </h2>
-                <p className="muted mt-1 text-sm">{t("worker.block.subtitle")}</p>
-              </div>
-              <button
-                aria-label={t("auth.close")}
-                className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
-                disabled={saving}
-                onClick={() => setBlockDialogOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
+        <AppDialog
+          backdropClassName="fixed inset-0 z-30 grid place-items-center bg-slate-950/50 px-4 py-6"
+          className="surface max-h-full w-full max-w-md overflow-auto p-5 shadow-xl"
+          labelledBy="block-dialog-title"
+          onClose={closeBlockDialog}
+          testId="block-dialog-backdrop"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold" id="block-dialog-title">
+                {t("worker.block.title")}
+              </h2>
+              <p className="muted mt-1 text-sm">{t("worker.block.subtitle")}</p>
             </div>
+            <button
+              aria-label={t("auth.close")}
+              className="grid h-10 w-10 place-items-center rounded-md border border-[var(--line)] bg-white text-[var(--foreground)]"
+              disabled={saving}
+              onClick={closeBlockDialog}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
 
-            <form className="mt-5 grid gap-4" onSubmit={createBlockTime}>
+          <form className="mt-5 grid gap-4" onSubmit={createBlockTime}>
+            <label className="field">
+              <span>{t("fields.startDate")}</span>
+              <input
+                onChange={(event) => setBlockDate(event.target.value)}
+                ref={blockFirstFieldRef}
+                required
+                type="date"
+                value={blockDate}
+              />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
               <label className="field">
-                <span>{t("fields.startDate")}</span>
+                <span>{t("worker.block.from")}</span>
                 <input
-                  onChange={(event) => setBlockDate(event.target.value)}
+                  onChange={(event) => setBlockStart(event.target.value)}
                   required
-                  type="date"
-                  value={blockDate}
+                  step={900}
+                  type="time"
+                  value={blockStart}
                 />
               </label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="field">
-                  <span>{t("worker.block.from")}</span>
-                  <input
-                    onChange={(event) => setBlockStart(event.target.value)}
-                    required
-                    step={900}
-                    type="time"
-                    value={blockStart}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t("worker.block.to")}</span>
-                  <input
-                    onChange={(event) => setBlockEnd(event.target.value)}
-                    required
-                    step={900}
-                    type="time"
-                    value={blockEnd}
-                  />
-                </label>
-              </div>
               <label className="field">
-                <span>{t("worker.block.reason")}</span>
+                <span>{t("worker.block.to")}</span>
                 <input
-                  onChange={(event) => setBlockReason(event.target.value)}
-                  value={blockReason}
+                  onChange={(event) => setBlockEnd(event.target.value)}
+                  required
+                  step={900}
+                  type="time"
+                  value={blockEnd}
                 />
               </label>
-              <button className="btn-primary" disabled={saving} type="submit">
-                {t("worker.block.save")}
-              </button>
-            </form>
-          </section>
-        </div>
+            </div>
+            <label className="field">
+              <span>{t("worker.block.reason")}</span>
+              <input onChange={(event) => setBlockReason(event.target.value)} value={blockReason} />
+            </label>
+            <button className="btn-primary" disabled={saving} type="submit">
+              {t("worker.block.save")}
+            </button>
+          </form>
+        </AppDialog>
       ) : null}
     </main>
   );

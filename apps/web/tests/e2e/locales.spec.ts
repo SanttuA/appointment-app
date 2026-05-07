@@ -171,6 +171,14 @@ test("patients can reach appointments from tabs and the next appointment banner"
   await expect(cancelDialog).toContainText("slot will become available");
   expect(cancelRequest).toBeNull();
 
+  await cancelDialog.click();
+  await expect(cancelDialog).toBeVisible();
+  await page.getByTestId("confirmation-dialog-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
+  expect(cancelRequest).toBeNull();
+
+  await firstAppointmentCard.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toBeVisible();
   await cancelDialog.getByRole("button", { name: "Keep appointment" }).click();
   await expect(page.getByRole("dialog", { name: "Cancel appointment?" })).toHaveCount(0);
   expect(cancelRequest).toBeNull();
@@ -350,6 +358,14 @@ test("initial slot load uses a service offered by the selected worker", async ({
   await expect(page.locator("select").nth(1)).toHaveValue(supportedService.id);
   await expect.poll(() => supportedSlotRequest).toBe(true);
   expect(invalidSlotRequest).toBe(false);
+
+  await page.getByRole("button", { name: "Log in" }).click();
+  const authDialog = page.getByRole("dialog", { name: "Account" });
+  await expect(authDialog).toBeVisible();
+  await authDialog.click();
+  await expect(authDialog).toBeVisible();
+  await page.getByTestId("auth-dialog-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog", { name: "Account" })).toHaveCount(0);
 });
 
 test("stale slot responses do not overwrite newer filter results", async ({ page }) => {
@@ -964,6 +980,19 @@ test("worker agenda shows patient details, status actions, and block time", asyn
   expect(weekLayout).toEqual({ cardCount: 4, cardsContained: true, pageFits: true });
 
   await page.getByRole("button", { name: "Block time", exact: true }).click();
+  const blockDialog = page.getByRole("dialog", { name: "Block time" });
+  await expect(blockDialog).toBeVisible();
+  await blockDialog.click();
+  await expect(blockDialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Block time" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Block time", exact: true }).click();
+  await expect(blockDialog).toBeVisible();
+  await page.getByTestId("block-dialog-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog", { name: "Block time" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Block time", exact: true }).click();
   await page.getByLabel("Reason").fill("Admin time");
   await page.getByRole("button", { name: "Save block" }).click();
 
@@ -1079,7 +1108,20 @@ test("booking confirmation uses the context captured when the dialog opened", as
 
   await page.goto("/en");
   await page.getByRole("button", { name: "Book" }).click();
-  await expect(page.getByRole("dialog")).toContainText("East clinic");
+  const bookingDialog = page.getByRole("dialog", { name: "Confirm appointment" });
+  await expect(bookingDialog).toContainText("East clinic");
+  await bookingDialog.click();
+  await expect(bookingDialog).toBeVisible();
+  await page.getByTestId("booking-dialog-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog", { name: "Confirm appointment" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Book" }).click();
+  await expect(bookingDialog).toContainText("East clinic");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Confirm appointment" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Book" }).click();
+  await expect(bookingDialog).toContainText("East clinic");
   await page.locator("select").nth(1).selectOption(secondService.id, { force: true });
   await expect(page.locator("select").nth(1)).toHaveValue(secondService.id);
   await page.getByRole("button", { name: "Confirm booking" }).click();
@@ -1460,6 +1502,13 @@ test("admins use a dedicated workspace with management drawers and read-only boo
 
   await page.getByRole("button", { name: "Add user" }).click();
   let drawer = page.getByRole("dialog", { name: "Add user" });
+  await drawer.click();
+  await expect(drawer).toBeVisible();
+  await page.getByTestId("admin-drawer-backdrop").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByRole("dialog", { name: "Add user" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Add user" }).click();
+  drawer = page.getByRole("dialog", { name: "Add user" });
   await drawer.getByLabel("Name").fill("New Worker");
   await drawer.getByLabel("Email").fill("new.worker@example.com");
   await drawer.getByLabel("Location").fill("West clinic");
