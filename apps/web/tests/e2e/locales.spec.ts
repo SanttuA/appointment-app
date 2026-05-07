@@ -1,20 +1,12 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-
-function inputDateFromToday(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function monthDistance(fromDate: string, toDate: string) {
-  const from = new Date(`${fromDate}T00:00:00.000Z`);
-  const to = new Date(`${toDate}T00:00:00.000Z`);
-  return (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth();
-}
+import {
+  inputDateFromToday,
+  monthDistance,
+  routeCatalog,
+  routeSession,
+  routeWorkerSlots,
+} from "./fixtures/locales";
 
 test("renders the English and Finnish entry points", async ({ page }) => {
   await page.goto("/en");
@@ -97,9 +89,7 @@ test("patients can reach appointments from tabs and the next appointment banner"
   let currentAppointments = appointments;
   let cancelRequest: Record<string, unknown> | null = null;
 
-  await page.route("http://localhost:4000/auth/me", async (route) => {
-    await route.fulfill({ json: { user: patient } });
-  });
+  await routeSession(page, patient);
   await page.route("http://localhost:4000/appointments", async (route) => {
     await route.fulfill({ json: { appointments: currentAppointments } });
   });
@@ -112,15 +102,8 @@ test("patients can reach appointments from tabs and the next appointment banner"
     );
     await route.fulfill({ json: { appointment: currentAppointments[0] } });
   });
-  await page.route("http://localhost:4000/services", async (route) => {
-    await route.fulfill({ json: { services: [service] } });
-  });
-  await page.route("http://localhost:4000/workers", async (route) => {
-    await route.fulfill({ json: { workers: [worker] } });
-  });
-  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
-    await route.fulfill({ json: { slots: [] } });
-  });
+  await routeCatalog(page, { services: [service], workers: [worker] });
+  await routeWorkerSlots(page, "worker-one");
 
   await page.goto("/en");
 
@@ -233,9 +216,7 @@ test("patient cancellation confirmation lets the API decide cutoff state", async
   let currentAppointments = [appointment];
   let cancelRequest: Record<string, unknown> | null = null;
 
-  await page.route("http://localhost:4000/auth/me", async (route) => {
-    await route.fulfill({ json: { user: patient } });
-  });
+  await routeSession(page, patient);
   await page.route("http://localhost:4000/appointments", async (route) => {
     await route.fulfill({ json: { appointments: currentAppointments } });
   });
@@ -251,15 +232,8 @@ test("patient cancellation confirmation lets the API decide cutoff state", async
       await route.fulfill({ json: { appointment: currentAppointments[0] } });
     },
   );
-  await page.route("http://localhost:4000/services", async (route) => {
-    await route.fulfill({ json: { services: [service] } });
-  });
-  await page.route("http://localhost:4000/workers", async (route) => {
-    await route.fulfill({ json: { workers: [worker] } });
-  });
-  await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
-    await route.fulfill({ json: { slots: [] } });
-  });
+  await routeCatalog(page, { services: [service], workers: [worker] });
+  await routeWorkerSlots(page, "worker-one");
 
   await page.goto("/en");
   await page.getByRole("tab", { name: /My appointments/ }).click();
