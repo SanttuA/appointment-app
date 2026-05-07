@@ -13,7 +13,8 @@
     "db:migrate": "tsx prisma/migrate.ts",
     "db:deploy": "tsx prisma/migrate.ts",
     "db:push": "tsx prisma/migrate.ts",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:e2e": "tsx prisma/e2e-seed.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.0.2",
