@@ -113,6 +113,7 @@ export function calendarMonthDays(inputDate: string) {
 export function calendarWeekdayLabels(locale: Locale) {
   return Array.from({ length: 7 }, (_, index) =>
     new Intl.DateTimeFormat(locale === "fi" ? "fi-FI" : "en-US", {
+      timeZone: "UTC",
       weekday: "short",
     }).format(new Date(Date.UTC(2026, 4, 4 + index))),
   );

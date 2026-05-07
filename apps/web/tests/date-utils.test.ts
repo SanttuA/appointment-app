@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  calendarWeekdayLabels,
   centerDateStripStart,
   formatDateKey,
   inputDateMinuteInTimeZone,
@@ -38,5 +39,23 @@ describe("appointment date utilities", () => {
   it("formats date keys in the requested timezone", () => {
     expect(formatDateKey("2026-05-03T21:30:00.000Z", "Europe/Helsinki")).toBe("2026-05-04");
     expect(formatDateKey("2026-05-03T21:30:00.000Z", "UTC")).toBe("2026-05-03");
+  });
+
+  it("keeps calendar weekday headings Monday-first west of UTC", () => {
+    const originalTimeZone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      expect(calendarWeekdayLabels("en")).toEqual([
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun",
+      ]);
+    } finally {
+      process.env.TZ = originalTimeZone;
+    }
   });
 });
