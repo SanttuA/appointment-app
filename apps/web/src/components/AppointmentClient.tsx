@@ -515,15 +515,26 @@ function roleLabel(role: Role, t: ReturnType<typeof useTranslations>) {
 }
 
 function servicesForWorker(worker: Worker | undefined, fallbackServices: Service[]) {
-  return worker ? worker.services : fallbackServices;
+  if (!worker) return fallbackServices;
+  const activeCatalogIds = new Set(fallbackServices.map((service) => service.id));
+  return worker.services.filter(
+    (service) => service.active && (!activeCatalogIds.size || activeCatalogIds.has(service.id)),
+  );
 }
 
 function defaultServiceIdForWorker(worker: Worker | undefined, fallbackServices: Service[]) {
   return servicesForWorker(worker, fallbackServices)[0]?.id ?? "";
 }
 
-function workerSupportsService(worker: Worker | undefined, serviceId: string) {
-  return Boolean(serviceId && worker?.services.some((service) => service.id === serviceId));
+function workerSupportsService(
+  worker: Worker | undefined,
+  serviceId: string,
+  fallbackServices: Service[],
+) {
+  return Boolean(
+    serviceId &&
+    servicesForWorker(worker, fallbackServices).some((service) => service.id === serviceId),
+  );
 }
 
 function defaultWorkerDayForms(location = "Main clinic"): WorkerDayForm[] {
@@ -791,7 +802,11 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
 
   const selectedWorker = workers.find((worker) => worker.id === selectedWorkerId);
   const selectableServices = servicesForWorker(selectedWorker, services);
-  const selectedWorkerSupportsService = workerSupportsService(selectedWorker, selectedServiceId);
+  const selectedWorkerSupportsService = workerSupportsService(
+    selectedWorker,
+    selectedServiceId,
+    services,
+  );
   const bookingMaxDate = useMemo(
     () => addDays(bookingMinDate, bookingHorizonDays - 1),
     [bookingMinDate],
@@ -996,7 +1011,7 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     const fallbackWorker = workerData.workers[0];
     const nextWorker =
       workerData.workers.find((worker) => worker.id === selectedWorkerId) ?? fallbackWorker;
-    const nextServiceId = workerSupportsService(nextWorker, selectedServiceId)
+    const nextServiceId = workerSupportsService(nextWorker, selectedServiceId, serviceData.services)
       ? selectedServiceId
       : defaultServiceIdForWorker(nextWorker, serviceData.services);
 
@@ -1005,12 +1020,12 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
     return workerData.workers;
   }
 
-  async function loadAdminAvailableSlotsToday(workerData: Worker[]) {
+  async function loadAdminAvailableSlotsToday(workerData: Worker[], activeServices: Service[]) {
     const slotCounts = await Promise.all(
       workerData
         .filter((worker) => worker.active)
         .map(async (worker) => {
-          const serviceId = worker.services.find((service) => service.active)?.id;
+          const serviceId = servicesForWorker(worker, activeServices)[0]?.id;
           if (!serviceId) return 0;
           const today = formatDateKey(new Date(), worker.timezone);
           const from = inputDateStartInTimeZone(today, worker.timezone);
@@ -1037,15 +1052,16 @@ export function AppointmentClient({ locale }: { locale: Locale }) {
   }
 
   async function loadAdminData(workerData = workers) {
-    const [userData, serviceData, appointmentData] = await Promise.all([
+    const [userData, serviceData, appointmentData, activeServiceData] = await Promise.all([
       apiRequest<{ users: User[] }>("/admin/users"),
       apiRequest<{ services: Service[] }>("/admin/services"),
       apiRequest<{ appointments: Appointment[] }>("/admin/appointments"),
+      apiRequest<{ services: Service[] }>("/services"),
     ]);
     setAdminUsers(userData.users);
     setAdminServices(serviceData.services);
     setAdminAppointments(appointmentData.appointments);
-    await loadAdminAvailableSlotsToday(workerData);
+    await loadAdminAvailableSlotsToday(workerData, activeServiceData.services);
   }
 
   async function refreshSession(catalogWorkers = workers) {

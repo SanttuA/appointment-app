@@ -1218,6 +1218,12 @@ test("admins use a dedicated workspace with management drawers and read-only boo
     id: "service-general",
     name: { en: "General practice", fi: "Yleislääkäri" },
   };
+  const nurseService: AdminTestService = {
+    active: true,
+    description: { en: "Nurse appointments", fi: "Hoitaja-ajat" },
+    id: "service-nurse",
+    name: { en: "Nurse triage", fi: "Hoitajan arvio" },
+  };
   const bloodService: AdminTestService = {
     active: false,
     description: { en: null, fi: null },
@@ -1233,7 +1239,7 @@ test("admins use a dedicated workspace with management drawers and read-only boo
     location: "Main clinic",
     minimumNoticeMinutes: 0,
     name: "Dr. Aino Lehto",
-    services: [generalService],
+    services: [generalService, nurseService],
     timezone: "Europe/Helsinki",
     title: "General practitioner",
   };
@@ -1278,7 +1284,7 @@ test("admins use a dedicated workspace with management drawers and read-only boo
     workerProfile: null,
   };
   let adminUsers = [adminUser, workerUser, patientUser];
-  let adminServices: AdminTestService[] = [generalService, bloodService];
+  let adminServices: AdminTestService[] = [generalService, nurseService, bloodService];
   const adminAppointments = [
     {
       endsAt: "2026-05-04T06:30:00.000Z",
@@ -1306,6 +1312,7 @@ test("admins use a dedicated workspace with management drawers and read-only boo
   const patchedUsers: Array<Record<string, unknown>> = [];
   const createdServices: Array<Record<string, unknown>> = [];
   const patchedServices: Array<Record<string, unknown>> = [];
+  const slotServiceRequests: string[] = [];
 
   await page.route("http://localhost:4000/auth/me", async (route) => {
     await route.fulfill({ json: { user: adminUser } });
@@ -1407,6 +1414,18 @@ test("admins use a dedicated workspace with management drawers and read-only boo
   await page.route(/http:\/\/localhost:4000\/workers\/worker-one\/slots.*/, async (route) => {
     const url = new URL(route.request().url());
     const from = url.searchParams.get("from") ?? "";
+    const serviceId = url.searchParams.get("serviceId") ?? "";
+    slotServiceRequests.push(serviceId);
+    if (
+      serviceId === "service-general" &&
+      !adminServices.find((service) => service.id === serviceId)?.active
+    ) {
+      await route.fulfill({
+        status: 400,
+        json: { error: { code: "SERVICE_NOT_AVAILABLE" } },
+      });
+      return;
+    }
     const day = from.startsWith("2026-05-03") ? "2026-05-04" : "2026-05-05";
     await route.fulfill({
       json: {
@@ -1429,7 +1448,7 @@ test("admins use a dedicated workspace with management drawers and read-only boo
     "true",
   );
   await expect(page.getByRole("tab", { name: "Book an appointment" })).toHaveCount(0);
-  await expect(page.getByText("Appointments today")).toBeVisible();
+  await expect(page.getByText("Appointments today", { exact: true })).toBeVisible();
   await expect(page.getByText("Matti Virtanen · Dr. Aino Lehto")).toBeVisible();
 
   await page.getByRole("tab", { name: /Users\s+3/ }).click();
@@ -1490,6 +1509,7 @@ test("admins use a dedicated workspace with management drawers and read-only boo
   drawer = page.getByRole("dialog", { name: "Edit service" });
   await drawer.getByLabel("Service name in English").fill("General practice updated");
   await drawer.getByLabel("Active").uncheck();
+  slotServiceRequests.length = 0;
   await drawer.getByRole("button", { name: "Save service" }).click();
   await expect.poll(() => patchedServices[0]?.nameEn).toBe("General practice updated");
   expect(patchedServices[0]).toMatchObject({ active: false });
@@ -1497,7 +1517,9 @@ test("admins use a dedicated workspace with management drawers and read-only boo
   await page.getByRole("tab", { name: "Booking view" }).click();
   await expect(page.getByRole("heading", { name: "Booking view" })).toBeVisible();
   await expect(page.getByText("Read-only reference")).toBeVisible();
+  await expect(page.getByLabel("Service")).toHaveValue("service-nurse");
   await expect(page.getByText("Available").first()).toBeVisible();
+  expect(slotServiceRequests.at(-1)).toBe("service-nurse");
   await expect(page.getByRole("button", { name: "Book" })).toHaveCount(0);
 });
 
